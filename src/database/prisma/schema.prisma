@@ -1,0 +1,403 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+model Account {
+  id              String    @id @default(uuid()) @db.Uuid
+  authUserId      String    @unique @map("auth_user_id")
+  email           String    @unique
+  phone           String?
+  role            String
+  status          String    @default("active")
+  fullName        String    @map("full_name")
+  avatarUrl       String?   @map("avatar_url")
+  coverUrl        String?   @map("cover_url")
+  bio             String?
+  locationCity    String?   @map("location_city")
+  locationCountry String    @default("Nigeria") @map("location_country")
+  isAnonymous     Boolean   @default(false) @map("is_anonymous")
+  avgRating       Decimal   @default(0) @map("avg_rating") @db.Decimal(3, 2)
+  reviewCount     Int       @default(0) @map("review_count")
+  connectionCount Int       @default(0) @map("connection_count")
+  followerCount   Int       @default(0) @map("follower_count")
+  followingCount  Int       @default(0) @map("following_count")
+  lastActiveAt    DateTime  @default(now()) @map("last_active_at")
+  createdAt       DateTime  @default(now()) @map("created_at")
+  updatedAt       DateTime  @updatedAt @map("updated_at")
+  deletedAt       DateTime? @map("deleted_at")
+
+  lawyerProfile     LawyerProfile?
+  firmProfile       FirmProfile?
+  practiceAreaLinks AccountPracticeArea[]
+  posts             Post[]
+  articles          Article[]
+  postReactions     PostReaction[]
+  articleReactions  ArticleReaction[]
+  followsAsFollower Follow[]              @relation("Follower")
+  followsAsFollowed Follow[]              @relation("Followed")
+  outgoingRequests  Request[]             @relation("UserRequests")
+  incomingLeads     Request[]             @relation("LawyerLeads")
+  conversationsAsUser   Conversation[]    @relation("ConvUser")
+  conversationsAsLawyer Conversation[]    @relation("ConvLawyer")
+  conversationsClosed   Conversation[]    @relation("ConvClosedBy")
+  messagesSent      Message[]
+  reviewsGiven      Review[]              @relation("ReviewsGiven")
+  reviewsReceived   Review[]              @relation("ReviewsReceived")
+  notifications     Notification[]
+  eventsCreated     Event[]
+  verificationDocuments VerificationDocument[] @relation("AccountKyc")
+  reviewedKycDocs       VerificationDocument[] @relation("AdminKycReview")
+  firmsAsVerifyingPartner FirmProfile[]   @relation("VerifyingPartner")
+  adminAuditLog     AdminAuditLog[]
+
+  @@index([role, status])
+  @@index([role, status, locationCity])
+  @@index([lastActiveAt(sort: Desc)])
+  @@map("accounts")
+}
+
+model LawyerProfile {
+  id                       String    @id @default(uuid()) @db.Uuid
+  accountId                String    @unique @map("account_id") @db.Uuid
+  scn                      String?   @unique
+  callToBarYear            Int       @map("call_to_bar_year")
+  nbaBranch                String?   @map("nba_branch")
+  feeRangeMin              Int       @default(0) @map("fee_range_min")
+  feeRangeMax              Int       @default(0) @map("fee_range_max")
+  verificationStatus       String    @default("verified") @map("verification_status")
+  verificationFlags        Json      @default("{}") @map("verification_flags")
+  practicingCertExpiresAt  DateTime? @map("practicing_cert_expires_at")
+  createdAt                DateTime  @default(now()) @map("created_at")
+  updatedAt                DateTime  @updatedAt @map("updated_at")
+
+  account Account @relation(fields: [accountId], references: [id], onDelete: Cascade)
+
+  @@index([verificationStatus])
+  @@index([feeRangeMin, feeRangeMax])
+  @@map("lawyer_profiles")
+}
+
+model FirmProfile {
+  id                        String   @id @default(uuid()) @db.Uuid
+  accountId                 String   @unique @map("account_id") @db.Uuid
+  firmName                  String   @map("firm_name")
+  rcNumber                  String?  @unique @map("rc_number")
+  firmEstablishmentYear     Int      @map("firm_establishment_year")
+  verifyingPartnerAccountId String?  @map("verifying_partner_account_id") @db.Uuid
+  verifyingPartnerScn       String?  @map("verifying_partner_scn")
+  feeRangeMin               Int      @default(0) @map("fee_range_min")
+  feeRangeMax               Int      @default(0) @map("fee_range_max")
+  verificationStatus        String   @default("verified") @map("verification_status")
+  verificationFlags         Json     @default("{}") @map("verification_flags")
+  createdAt                 DateTime @default(now()) @map("created_at")
+  updatedAt                 DateTime @updatedAt @map("updated_at")
+
+  account           Account  @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  verifyingPartner  Account? @relation("VerifyingPartner", fields: [verifyingPartnerAccountId], references: [id])
+
+  @@index([verificationStatus])
+  @@index([feeRangeMin, feeRangeMax])
+  @@map("firm_profiles")
+}
+
+model PracticeArea {
+  id        String   @id @default(uuid()) @db.Uuid
+  name      String   @unique
+  slug      String   @unique
+  isActive  Boolean  @default(true) @map("is_active")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  accountLinks AccountPracticeArea[]
+
+  @@map("practice_areas")
+}
+
+model AccountPracticeArea {
+  id             String   @id @default(uuid()) @db.Uuid
+  accountId      String   @map("account_id") @db.Uuid
+  practiceAreaId String   @map("practice_area_id") @db.Uuid
+  createdAt      DateTime @default(now()) @map("created_at")
+
+  account      Account      @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  practiceArea PracticeArea @relation(fields: [practiceAreaId], references: [id], onDelete: Cascade)
+
+  @@unique([accountId, practiceAreaId])
+  @@index([practiceAreaId])
+  @@map("account_practice_areas")
+}
+
+model Article {
+  id                String    @id @default(uuid()) @db.Uuid
+  authorAccountId   String    @map("author_account_id") @db.Uuid
+  title             String
+  slug              String    @unique
+  coverUrl          String?   @map("cover_url")
+  body              String
+  readCount         Int       @default(0) @map("read_count")
+  likeCount         Int       @default(0) @map("like_count")
+  dislikeCount      Int       @default(0) @map("dislike_count")
+  status            String    @default("draft")
+  publishedAt       DateTime? @map("published_at")
+  createdAt         DateTime  @default(now()) @map("created_at")
+  updatedAt         DateTime  @updatedAt @map("updated_at")
+  deletedAt         DateTime? @map("deleted_at")
+
+  author     Account           @relation(fields: [authorAccountId], references: [id], onDelete: Cascade)
+  reactions  ArticleReaction[]
+  posts      Post[]
+
+  @@index([authorAccountId])
+  @@index([status, publishedAt(sort: Desc)])
+  @@map("articles")
+}
+
+model ArticleReaction {
+  id        String   @id @default(uuid()) @db.Uuid
+  articleId String   @map("article_id") @db.Uuid
+  accountId String   @map("account_id") @db.Uuid
+  type      String
+  createdAt DateTime @default(now()) @map("created_at")
+
+  article Article @relation(fields: [articleId], references: [id], onDelete: Cascade)
+  account Account @relation(fields: [accountId], references: [id], onDelete: Cascade)
+
+  @@unique([articleId, accountId])
+  @@map("article_reactions")
+}
+
+model Post {
+  id                String    @id @default(uuid()) @db.Uuid
+  authorAccountId   String    @map("author_account_id") @db.Uuid
+  body              String
+  attachedArticleId String?   @map("attached_article_id") @db.Uuid
+  likeCount         Int       @default(0) @map("like_count")
+  dislikeCount      Int       @default(0) @map("dislike_count")
+  createdAt         DateTime  @default(now()) @map("created_at")
+  updatedAt         DateTime  @updatedAt @map("updated_at")
+  deletedAt         DateTime? @map("deleted_at")
+
+  author          Account        @relation(fields: [authorAccountId], references: [id], onDelete: Cascade)
+  attachedArticle Article?       @relation(fields: [attachedArticleId], references: [id])
+  reactions       PostReaction[]
+
+  @@index([authorAccountId])
+  @@index([createdAt(sort: Desc)])
+  @@index([attachedArticleId])
+  @@map("posts")
+}
+
+model PostReaction {
+  id        String   @id @default(uuid()) @db.Uuid
+  postId    String   @map("post_id") @db.Uuid
+  accountId String   @map("account_id") @db.Uuid
+  type      String
+  createdAt DateTime @default(now()) @map("created_at")
+
+  post    Post    @relation(fields: [postId], references: [id], onDelete: Cascade)
+  account Account @relation(fields: [accountId], references: [id], onDelete: Cascade)
+
+  @@unique([postId, accountId])
+  @@map("post_reactions")
+}
+
+model Follow {
+  id                 String   @id @default(uuid()) @db.Uuid
+  followerAccountId  String   @map("follower_account_id") @db.Uuid
+  followedAccountId  String   @map("followed_account_id") @db.Uuid
+  createdAt          DateTime @default(now()) @map("created_at")
+
+  follower Account @relation("Follower", fields: [followerAccountId], references: [id], onDelete: Cascade)
+  followed Account @relation("Followed", fields: [followedAccountId], references: [id], onDelete: Cascade)
+
+  @@unique([followerAccountId, followedAccountId])
+  @@map("follows")
+}
+
+model Request {
+  id              String    @id @default(uuid()) @db.Uuid
+  userAccountId   String    @map("user_account_id") @db.Uuid
+  lawyerAccountId String    @map("lawyer_account_id") @db.Uuid
+  intakePayload   Json      @map("intake_payload")
+  relevanceScore  Int       @default(0) @map("relevance_score")
+  status          String    @default("pending")
+  conversationId  String?   @unique @map("conversation_id") @db.Uuid
+  createdAt       DateTime  @default(now()) @map("created_at")
+  respondedAt     DateTime? @map("responded_at")
+  expiresAt       DateTime  @map("expires_at")
+
+  userAccount   Account       @relation("UserRequests", fields: [userAccountId], references: [id], onDelete: Cascade)
+  lawyerAccount Account       @relation("LawyerLeads", fields: [lawyerAccountId], references: [id], onDelete: Cascade)
+  conversation  Conversation? @relation(fields: [conversationId], references: [id])
+
+  @@index([userAccountId, status, createdAt(sort: Desc)])
+  @@index([lawyerAccountId, status, createdAt(sort: Desc)])
+  @@index([expiresAt])
+  @@map("requests")
+}
+
+model Conversation {
+  id                  String    @id @default(uuid()) @db.Uuid
+  userAccountId       String    @map("user_account_id") @db.Uuid
+  lawyerAccountId     String    @map("lawyer_account_id") @db.Uuid
+  requestId           String    @unique @map("request_id") @db.Uuid
+  status              String    @default("active")
+  lastMessageAt       DateTime? @map("last_message_at")
+  lastMessagePreview  String?   @map("last_message_preview")
+  closedAt            DateTime? @map("closed_at")
+  closedByAccountId   String?   @map("closed_by_account_id") @db.Uuid
+  createdAt           DateTime  @default(now()) @map("created_at")
+
+  userAccount   Account  @relation("ConvUser", fields: [userAccountId], references: [id], onDelete: Cascade)
+  lawyerAccount Account  @relation("ConvLawyer", fields: [lawyerAccountId], references: [id], onDelete: Cascade)
+  closedBy      Account? @relation("ConvClosedBy", fields: [closedByAccountId], references: [id])
+  request       Request?
+  messages      Message[]
+  reviews       Review[]
+  connections   Connection[]
+
+  @@index([userAccountId, lastMessageAt(sort: Desc)])
+  @@index([lawyerAccountId, lastMessageAt(sort: Desc)])
+  @@map("conversations")
+}
+
+model Message {
+  id              String    @id @default(uuid()) @db.Uuid
+  conversationId  String    @map("conversation_id") @db.Uuid
+  senderAccountId String    @map("sender_account_id") @db.Uuid
+  body            String
+  attachments     Json?
+  readAt          DateTime? @map("read_at")
+  createdAt       DateTime  @default(now()) @map("created_at")
+
+  conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  sender       Account      @relation(fields: [senderAccountId], references: [id], onDelete: Cascade)
+
+  @@index([conversationId, createdAt(sort: Desc)])
+  @@map("messages")
+}
+
+model Connection {
+  id                  String   @id @default(uuid()) @db.Uuid
+  accountAId          String   @map("account_a_id") @db.Uuid
+  accountBId          String   @map("account_b_id") @db.Uuid
+  firstConversationId String   @map("first_conversation_id") @db.Uuid
+  createdAt           DateTime @default(now()) @map("created_at")
+
+  firstConversation Conversation @relation(fields: [firstConversationId], references: [id])
+
+  @@unique([accountAId, accountBId])
+  @@index([accountAId])
+  @@index([accountBId])
+  @@map("connections")
+}
+
+model Review {
+  id                 String    @id @default(uuid()) @db.Uuid
+  reviewerAccountId  String    @map("reviewer_account_id") @db.Uuid
+  reviewedAccountId  String    @map("reviewed_account_id") @db.Uuid
+  conversationId     String    @map("conversation_id") @db.Uuid
+  rating             Int
+  body               String?
+  createdAt          DateTime  @default(now()) @map("created_at")
+  deletedAt          DateTime? @map("deleted_at")
+
+  reviewer     Account      @relation("ReviewsGiven", fields: [reviewerAccountId], references: [id], onDelete: Cascade)
+  reviewed     Account      @relation("ReviewsReceived", fields: [reviewedAccountId], references: [id], onDelete: Cascade)
+  conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  @@unique([reviewerAccountId, reviewedAccountId, conversationId])
+  @@index([reviewedAccountId, createdAt(sort: Desc)])
+  @@index([conversationId])
+  @@map("reviews")
+}
+
+model Notification {
+  id                  String    @id @default(uuid()) @db.Uuid
+  recipientAccountId  String    @map("recipient_account_id") @db.Uuid
+  type                String
+  payload             Json
+  readAt              DateTime? @map("read_at")
+  emailedAt           DateTime? @map("emailed_at")
+  createdAt           DateTime  @default(now()) @map("created_at")
+
+  recipient Account @relation(fields: [recipientAccountId], references: [id], onDelete: Cascade)
+
+  @@index([recipientAccountId, createdAt(sort: Desc)])
+  @@index([recipientAccountId, readAt])
+  @@map("notifications")
+}
+
+model Event {
+  id                String    @id @default(uuid()) @db.Uuid
+  title             String
+  description       String?
+  coverUrl          String?   @map("cover_url")
+  location          String?
+  startAt           DateTime  @map("start_at")
+  endAt             DateTime? @map("end_at")
+  registrationUrl   String?   @map("registration_url")
+  status            String    @default("draft")
+  createdByAdminId  String    @map("created_by_admin_id") @db.Uuid
+  createdAt         DateTime  @default(now()) @map("created_at")
+  updatedAt         DateTime  @updatedAt @map("updated_at")
+
+  createdByAdmin Account @relation(fields: [createdByAdminId], references: [id])
+
+  @@index([status, startAt])
+  @@map("events")
+}
+
+model VerificationDocument {
+  id                 String    @id @default(uuid()) @db.Uuid
+  accountId          String    @map("account_id") @db.Uuid
+  docType            String    @map("doc_type")
+  s3Key              String    @map("s3_key")
+  ocrExtracted       Json?     @map("ocr_extracted")
+  status             String    @default("pending")
+  reviewedByAdminId  String?   @map("reviewed_by_admin_id") @db.Uuid
+  reviewedAt         DateTime? @map("reviewed_at")
+  rejectionReason    String?   @map("rejection_reason")
+  createdAt          DateTime  @default(now()) @map("created_at")
+
+  account         Account  @relation("AccountKyc", fields: [accountId], references: [id], onDelete: Cascade)
+  reviewedByAdmin Account? @relation("AdminKycReview", fields: [reviewedByAdminId], references: [id])
+
+  @@index([accountId, docType])
+  @@index([status])
+  @@map("verification_documents")
+}
+
+model AdminAuditLog {
+  id              String   @id @default(uuid()) @db.Uuid
+  adminAccountId  String   @map("admin_account_id") @db.Uuid
+  action          String
+  targetType      String?  @map("target_type")
+  targetId        String?  @map("target_id") @db.Uuid
+  reason          String?
+  metadata        Json?
+  createdAt       DateTime @default(now()) @map("created_at")
+
+  admin Account @relation(fields: [adminAccountId], references: [id])
+
+  @@index([adminAccountId, createdAt(sort: Desc)])
+  @@index([targetType, targetId])
+  @@map("admin_audit_log")
+}
+
+model AccountSettings {
+  id                          String   @id @default(uuid()) @db.Uuid
+  accountId                   String   @unique @map("account_id") @db.Uuid
+  notificationEmailEnabled    Boolean  @default(true) @map("notification_email_enabled")
+  language                    String   @default("en")
+  theme                       String   @default("light")
+  createdAt                   DateTime @default(now()) @map("created_at")
+  updatedAt                   DateTime @updatedAt @map("updated_at")
+
+  @@map("account_settings")
+}

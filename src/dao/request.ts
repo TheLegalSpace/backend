@@ -1,0 +1,84 @@
+import { prisma } from "../config/database";
+
+export const createRequest = async (data: {
+  userAccountId: string;
+  lawyerAccountId: string;
+  intakePayload: any;
+  relevanceScore: number;
+  expiresAt: Date;
+}) => {
+  return prisma.request.create({ data });
+};
+
+export const findRequestById = async (id: string) => {
+  return prisma.request.findUnique({
+    where: { id },
+    include: {
+      userAccount: { include: { lawyerProfile: true, firmProfile: true } },
+      lawyerAccount: { include: { lawyerProfile: true, firmProfile: true } },
+      conversation: true,
+    },
+  });
+};
+
+export const listRequests = async (
+  userAccountId: string,
+  filters: { status?: string },
+  skip: number,
+  take: number
+) => {
+  const where: any = { userAccountId };
+  if (filters.status) where.status = filters.status;
+  const [items, total] = await Promise.all([
+    prisma.request.findMany({
+      where,
+      include: { lawyerAccount: { include: { lawyerProfile: true, firmProfile: true } } },
+      orderBy: { createdAt: "desc" },
+      skip,
+      take,
+    }),
+    prisma.request.count({ where }),
+  ]);
+  return { items, total };
+};
+
+export const listLeads = async (
+  lawyerAccountId: string,
+  filters: { status?: string },
+  skip: number,
+  take: number
+) => {
+  const where: any = { lawyerAccountId };
+  if (filters.status) where.status = filters.status;
+  const [items, total] = await Promise.all([
+    prisma.request.findMany({
+      where,
+      include: { userAccount: { include: { lawyerProfile: true, firmProfile: true } } },
+      orderBy: { createdAt: "desc" },
+      skip,
+      take,
+    }),
+    prisma.request.count({ where }),
+  ]);
+  return { items, total };
+};
+
+export const cancelRequest = async (id: string) => {
+  return prisma.request.update({
+    where: { id },
+    data: { status: "expired", respondedAt: new Date() },
+  });
+};
+
+export const declineRequest = async (id: string, reason?: string) => {
+  return prisma.$transaction(async (tx) => {
+    const existing = await tx.request.findUnique({ where: { id } });
+    if (!existing) throw new Error("Request not found");
+    const intake = (existing.intakePayload as any) || {};
+    if (reason) intake.declineReason = reason;
+    return tx.request.update({
+      where: { id },
+      data: { status: "declined", respondedAt: new Date(), intakePayload: intake },
+    });
+  });
+};

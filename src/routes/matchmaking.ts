@@ -1,0 +1,65 @@
+import { FastifyInstance } from "fastify";
+import { authHook } from "../middleware/auth";
+import { requireRole } from "../middleware/requireRole";
+import { stricter } from "../middleware/rateLimiter";
+import {
+  search,
+  saveIntake,
+  getIntake,
+  restartIntake,
+} from "../controller/matchmaking";
+
+const intakeBody = {
+  type: "object",
+  required: ["matter", "budget", "location", "preference"],
+  properties: {
+    matter: { type: "string", format: "uuid" },
+    budget: {
+      type: "string",
+      enum: ["under_100k", "100k_to_500k", "500k_to_2m", "above_2m"],
+    },
+    location: { type: "string", minLength: 1, maxLength: 80 },
+    preference: { type: "string", enum: ["lawyer", "firm", "either"] },
+    freeText: { type: "string", maxLength: 5000 },
+  },
+};
+
+const partialIntakeBody = {
+  type: "object",
+  properties: {
+    matter: { type: "string", format: "uuid" },
+    budget: {
+      type: "string",
+      enum: ["under_100k", "100k_to_500k", "500k_to_2m", "above_2m"],
+    },
+    location: { type: "string", minLength: 1, maxLength: 80 },
+    preference: { type: "string", enum: ["lawyer", "firm", "either"] },
+    freeText: { type: "string", maxLength: 5000 },
+  },
+};
+
+export default async function matchmakingRoutes(fastify: FastifyInstance) {
+  fastify.addHook("onRequest", authHook);
+  fastify.addHook("preHandler", requireRole("USER"));
+
+  fastify.post(
+    "/search",
+    {
+      ...stricter(30, "1 minute"),
+      schema: {
+        body: intakeBody,
+        querystring: {
+          type: "object",
+          properties: {
+            page: { type: "integer", default: 1 },
+            limit: { type: "integer", default: 20 },
+          },
+        },
+      },
+    },
+    search
+  );
+  fastify.post("/intake", { schema: { body: partialIntakeBody } }, saveIntake);
+  fastify.get("/intake", getIntake);
+  fastify.post("/restart", restartIntake);
+}
