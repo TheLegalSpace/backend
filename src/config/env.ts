@@ -27,6 +27,11 @@ export const env = {
   r2Bucket: process.env.R2_BUCKET || "legalspace",
   r2PublicBaseUrl: process.env.R2_PUBLIC_BASE_URL || "",
 
+  cloudinaryCloudName: process.env.CLOUDINARY_CLOUD_NAME || "",
+  cloudinaryApiKey: process.env.CLOUDINARY_API_KEY || "",
+  cloudinaryApiSecret: process.env.CLOUDINARY_API_SECRET || "",
+  cloudinarySecure: process.env.SECURE === "true",
+
   brevoApiKey: process.env.BREVO_API_KEY || "",
   emailFrom: process.env.EMAIL_FROM || "notifications@thelegalspace.com",
   emailFromName: process.env.EMAIL_FROM_NAME || "The Legal Space",

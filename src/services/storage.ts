@@ -1,6 +1,6 @@
-import { PutObjectCommand } from "@aws-sdk/client-s3";
+import { v2 as cloudinary } from "cloudinary";
 import crypto from "crypto";
-import { r2, r2PublicUrl } from "../config/r2";
+import "../config/cloudinary"; // Ensure Cloudinary is configured
 import { env } from "../config/env";
 
 const ALLOWED_IMAGE_MIMES = ["image/jpeg", "image/png", "image/webp"];
@@ -23,17 +23,24 @@ export const uploadToR2 = async (input: UploadInput): Promise<{ key: string; url
   if (!allowed.includes(mimetype)) {
     throw new Error(`Unsupported file type: ${mimetype}`);
   }
-  const ext = originalName.includes(".") ? originalName.split(".").pop() : "bin";
-  const key = `${folder.replace(/\/$/, "")}/${Date.now()}-${crypto.randomBytes(8).toString("hex")}.${ext}`;
-  await r2.send(
-    new PutObjectCommand({
-      Bucket: env.r2Bucket,
-      Key: key,
-      Body: buffer,
-      ContentType: mimetype,
-    })
-  );
-  return { key, url: r2PublicUrl(key) };
+
+  // Upload to Cloudinary
+  const result = await new Promise<any>((resolve, reject) => {
+    const uploadStream = cloudinary.uploader.upload_stream(
+      {
+        folder: folder.replace(/\/$/, ""),
+        public_id: `${Date.now()}-${crypto.randomBytes(8).toString("hex")}`,
+        resource_type: "auto",
+      },
+      (error, result) => {
+        if (error) reject(error);
+        else resolve(result);
+      }
+    );
+    uploadStream.end(buffer);
+  });
+
+  return { key: result.public_id, url: result.secure_url };
 };
 
 export const MAX_AVATAR_BYTES = 10 * 1024 * 1024;
