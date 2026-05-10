@@ -48,7 +48,7 @@ const buildServer = async () => {
         description: "Two-sided platform connecting Nigerian users with verified lawyers and law firms",
         version: "0.1.0",
       },
-      servers: [{ url: `http://localhost:${env.port}${env.apiPrefix}` }],
+      servers: [{ url: `https://legalspace.onrender.com${env.apiPrefix}` }],
       components: {
         securitySchemes: {
           bearerAuth: { type: "http", scheme: "bearer", bearerFormat: "JWT" },
