@@ -78,13 +78,29 @@ const supabaseSignInPassword = async (email: string, password: string) => {
 };
 
 const supabaseSignInGoogle = async (idToken: string) => {
+  console.log("[AUTH] Google sign-in attempt");
+  console.log("[AUTH] Token preview:", idToken.substring(0, 20) + "...[truncated]");
+  console.log("[AUTH] Token length:", idToken.length);
+
   const { data, error } = await supabase.auth.signInWithIdToken({
     provider: "google",
     token: idToken,
   });
+
+  if (error) {
+    console.error("[AUTH] Google sign-in error:", {
+      message: error.message,
+      status: error.status,
+      statusCode: (error as any).statusCode,
+      fullError: JSON.stringify(error, null, 2),
+    });
+  }
+
   if (error || !data?.session) {
     throw new Error(error?.message || "Google sign-in failed");
   }
+
+  console.log("[AUTH] Google sign-in success:", { authUserId: data.user.id });
   return {
     authUserId: data.user.id,
     session: {
@@ -150,15 +166,18 @@ export const _registerUser = async (body: RegisterUserBody): Promise<Response> =
 
   if (body.authProvider === "google") {
     if (!body.idToken) throw new Error("idToken is required");
+    console.log("[AUTH] _registerUser Google path");
     const signed = await supabaseSignInGoogle(body.idToken);
     const existing = await findAccountByAuthUserId(signed.authUserId);
     if (existing) {
+      console.log("[AUTH] Existing account found, logging in");
       return response({
         error: false,
         message: "Logged in",
         data: { account: existing, session: sessionFromSignIn(signed.session) },
       });
     }
+    console.log("[AUTH] New Google account, creating USER");
     const fullName =
       body.fullName ||
       signed.metadata.full_name ||
@@ -247,6 +266,7 @@ export const _registerLawyer = async (body: RegisterLawyerBody): Promise<Respons
     session = signed.session;
   } else if (body.authProvider === "google") {
     if (!body.idToken) throw new Error("idToken is required");
+    console.log("[AUTH] _registerLawyer Google path");
     const signed = await supabaseSignInGoogle(body.idToken);
     authUserId = signed.authUserId;
     email = signed.email;
@@ -346,6 +366,7 @@ export const _registerFirm = async (body: RegisterFirmBody): Promise<Response> =
     session = signed.session;
   } else if (body.authProvider === "google") {
     if (!body.idToken) throw new Error("idToken is required");
+    console.log("[AUTH] _registerFirm Google path");
     const signed = await supabaseSignInGoogle(body.idToken);
     authUserId = signed.authUserId;
     email = signed.email;
@@ -381,9 +402,11 @@ interface LoginBody {
 export const _login = async (body: LoginBody): Promise<Response> => {
   let signed: any;
   if (body.authProvider === "email") {
+    console.log("[AUTH] Login with email");
     if (!body.email || !body.password) throw new Error("Email and password are required");
     signed = await supabaseSignInPassword(body.email, body.password);
   } else {
+    console.log("[AUTH] Login with Google");
     if (!body.idToken) throw new Error("idToken is required");
     signed = await supabaseSignInGoogle(body.idToken);
   }
@@ -393,6 +416,7 @@ export const _login = async (body: LoginBody): Promise<Response> => {
     err.statusCode = 404;
     throw err;
   }
+  console.log("[AUTH] Login successful:", { accountId: account.id });
   await invalidateAccountCache(signed.authUserId);
   return response({
     error: false,
