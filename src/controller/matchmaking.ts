@@ -4,8 +4,10 @@ import {
   _saveIntake,
   _getIntake,
   _restartIntake,
+  _searchByText,
 } from "../logic/matchmaking";
 import { responseOk, responseBad } from "../helpers/utility";
+import { ExtractionInsufficientError } from "../services/llm";
 
 export const search = async (req: FastifyRequest, reply: FastifyReply) => {
   try {
@@ -37,6 +39,26 @@ export const restartIntake = async (req: FastifyRequest, reply: FastifyReply) =>
   try {
     return responseOk(reply, await _restartIntake(req.account.id));
   } catch (e) {
+    return responseBad(reply, e);
+  }
+};
+
+export const searchByText = async (req: FastifyRequest, reply: FastifyReply) => {
+  try {
+    const { text } = req.body as { text: string };
+    const { page, limit } = req.query as any;
+    return responseOk(
+      reply,
+      await _searchByText(text, req.account.id, page, limit)
+    );
+  } catch (e: any) {
+    if (e instanceof ExtractionInsufficientError) {
+      return reply.status(422).send({
+        error: true,
+        message: e.message,
+        data: { extracted: e.extracted },
+      });
+    }
     return responseBad(reply, e);
   }
 };

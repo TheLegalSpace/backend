@@ -7,6 +7,7 @@ import {
   saveIntake,
   getIntake,
   restartIntake,
+  searchByText,
 } from "../controller/matchmaking";
 
 const intakeBody = {
@@ -62,4 +63,28 @@ export default async function matchmakingRoutes(fastify: FastifyInstance) {
   fastify.post("/intake", { schema: { body: partialIntakeBody } }, saveIntake);
   fastify.get("/intake", getIntake);
   fastify.post("/restart", restartIntake);
+
+  fastify.post(
+    "/search-by-text",
+    {
+      ...stricter(15, "1 minute"),
+      schema: {
+        body: {
+          type: "object",
+          required: ["text"],
+          properties: {
+            text: { type: "string", minLength: 10, maxLength: 5000 },
+          },
+        },
+        querystring: {
+          type: "object",
+          properties: {
+            page: { type: "integer", default: 1, minimum: 1 },
+            limit: { type: "integer", default: 20, minimum: 1, maximum: 100 },
+          },
+        },
+      },
+    },
+    searchByText
+  );
 }

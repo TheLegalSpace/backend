@@ -35,6 +35,8 @@ export const env = {
   brevoApiKey: process.env.BREVO_API_KEY || "",
   emailFrom: process.env.EMAIL_FROM || "notifications@thelegalspace.com",
   emailFromName: process.env.EMAIL_FROM_NAME || "The Legal Space",
+
+  geminiApiKey: process.env.GEMINI_API_KEY || "",
 };
 
 export const isProd = env.nodeEnv === "production";
