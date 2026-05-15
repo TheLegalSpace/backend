@@ -12,16 +12,28 @@ export interface DispatchNotificationInput {
 }
 
 export const dispatchNotification = async (data: DispatchNotificationInput) => {
+  console.log(
+    `[notification] dispatching type=${data.type} recipient=${data.recipientAccountId}`
+  );
   try {
     const notif = await createNotification({
       recipientAccountId: data.recipientAccountId,
       type: data.type,
       payload: data.payload,
     });
+    console.log(`[notification] inserted id=${notif.id} type=${data.type}`);
     emitToAccount(data.recipientAccountId, "notification", notif);
     await redis.del(`notif:unread:${data.recipientAccountId}`).catch(() => null);
-  } catch (err) {
-    console.error("[notification] dispatch failed:", (err as Error).message);
+  } catch (err: any) {
+    console.error("[notification] dispatch failed:", {
+      type: data.type,
+      recipient: data.recipientAccountId,
+      name: err?.name,
+      message: err?.message,
+      code: err?.code,
+      meta: err?.meta,
+      stack: err?.stack,
+    });
   }
 };
 
