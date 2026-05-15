@@ -14,7 +14,7 @@ import {
   removeArticleReaction,
 } from "../dao/article";
 import { maskAccount } from "../services/anonymity";
-import { enqueueNotification } from "../services/notification";
+import { dispatchNotification } from "../services/notification";
 import { uploadToR2, MAX_ARTICLE_ASSET_BYTES } from "../services/storage";
 
 const generateSlug = (title: string) =>
@@ -43,7 +43,7 @@ export const _createArticle = async (
       select: { followerAccountId: true },
     });
     for (const f of followers) {
-      await enqueueNotification({
+      await dispatchNotification({
         recipientAccountId: f.followerAccountId,
         type: "article_published",
         payload: { articleId: article.id, slug: article.slug, title: article.title },

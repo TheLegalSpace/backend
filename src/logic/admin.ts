@@ -10,7 +10,7 @@ import {
   listAuditLog,
 } from "../dao/admin";
 import { paginate, buildPagination } from "../helpers/pagination";
-import { enqueueNotification } from "../services/notification";
+import { dispatchNotification } from "../services/notification";
 
 export const _listAccounts = async (
   filters: any,
@@ -77,7 +77,7 @@ export const _approveKyc = async (
     targetType: "account",
     targetId: accountId,
   });
-  await enqueueNotification({
+  await dispatchNotification({
     recipientAccountId: accountId,
     type: "verification_update",
     payload: { status: "verified" },
@@ -98,7 +98,7 @@ export const _rejectKyc = async (
     targetId: accountId,
     reason,
   });
-  await enqueueNotification({
+  await dispatchNotification({
     recipientAccountId: accountId,
     type: "verification_update",
     payload: { status: "rejected", reason },

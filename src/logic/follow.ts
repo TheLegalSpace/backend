@@ -9,7 +9,7 @@ import {
 import { findAccountById } from "../dao/account";
 import { paginate, buildPagination } from "../helpers/pagination";
 import { maskAccount } from "../services/anonymity";
-import { enqueueNotification } from "../services/notification";
+import { dispatchNotification } from "../services/notification";
 
 export const _follow = async (
   followerAccountId: string,
@@ -22,7 +22,7 @@ export const _follow = async (
   if (!target || target.status !== "active") throw notFound("Target not found");
   const { follow, created } = await followAccount(followerAccountId, followedAccountId);
   if (created) {
-    await enqueueNotification({
+    await dispatchNotification({
       recipientAccountId: followedAccountId,
       type: "new_follower",
       payload: { followerAccountId },

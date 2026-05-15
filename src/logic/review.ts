@@ -8,7 +8,7 @@ import {
 } from "../helpers/utility";
 import { Response } from "../interface";
 import { createReview } from "../dao/review";
-import { enqueueNotification } from "../services/notification";
+import { dispatchNotification } from "../services/notification";
 
 export const _submitReview = async (
   conversationId: string,
@@ -49,7 +49,7 @@ export const _submitReview = async (
     body: body.body,
   });
 
-  await enqueueNotification({
+  await dispatchNotification({
     recipientAccountId: reviewedAccountId,
     type: "new_review",
     payload: { reviewId: review.id, rating: body.rating },

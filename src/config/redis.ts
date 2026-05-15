@@ -23,7 +23,6 @@ const createClient = (): Redis => {
 };
 
 export const redis = createClient();
-export const bullConnection = createClient();
 export const subClient = createClient();
 export const pubClient = createClient();
 

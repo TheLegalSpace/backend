@@ -8,6 +8,11 @@ import { env, isProd } from "./config/env";
 import { connectDatabase, disconnectDatabase } from "./config/database";
 import { registerRateLimiter } from "./middleware/rateLimiter";
 import { initRealtime } from "./realtime/gateway";
+import { startStaleRequestJob } from "./jobs/staleRequests";
+import { startTopAccountsJob } from "./jobs/topAccounts";
+import { startDormantAccountJob } from "./jobs/dormantAccounts";
+import { startEventStatusJob } from "./jobs/eventStatus";
+import { startNotificationDigestJob } from "./jobs/notificationDigest";
 
 import authRoutes from "./routes/auth";
 import profileRoutes from "./routes/profile";
@@ -92,6 +97,13 @@ const start = async () => {
   await connectDatabase();
 
   initRealtime(app.server);
+
+  startStaleRequestJob();
+  startTopAccountsJob();
+  startDormantAccountJob();
+  startEventStatusJob();
+  startNotificationDigestJob();
+  console.log("[app] cron jobs scheduled");
 
   const shutdown = async () => {
     await app.close();

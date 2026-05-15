@@ -9,7 +9,7 @@ import {
 } from "../dao/post";
 import { prisma } from "../config/database";
 import { maskAccount } from "../services/anonymity";
-import { enqueueNotification } from "../services/notification";
+import { dispatchNotification } from "../services/notification";
 
 export const _createPost = async (
   authorAccountId: string,
@@ -61,7 +61,7 @@ export const _reactToPost = async (
   if (!post) throw notFound("Post not found");
   const { reaction, changed } = await upsertReaction(postId, accountId, type);
   if (changed && type === "like" && post.authorAccountId !== accountId) {
-    await enqueueNotification({
+    await dispatchNotification({
       recipientAccountId: post.authorAccountId,
       type: "post_liked",
       payload: { postId, accountId },

@@ -18,7 +18,7 @@ import {
 } from "../dao/conversation";
 import { paginate, buildPagination } from "../helpers/pagination";
 import { maskAccount } from "../services/anonymity";
-import { enqueueNotification } from "../services/notification";
+import { dispatchNotification } from "../services/notification";
 import { emitToConversation, emitToAccount } from "../realtime/emitter";
 
 export const _listConversations = async (
@@ -118,7 +118,7 @@ export const _sendMessage = async (
     .set(debounceKey, "1", "EX", 60, "NX")
     .catch(() => null);
   if (set === "OK") {
-    await enqueueNotification({
+    await dispatchNotification({
       recipientAccountId: recipientId,
       type: "new_message",
       payload: {
@@ -157,12 +157,12 @@ export const _closeConversation = async (
   const updated = await closeConversation(id, closedByAccountId);
   emitToConversation(id, "conversation:updated", updated);
 
-  await enqueueNotification({
+  await dispatchNotification({
     recipientAccountId: conv.userAccountId,
     type: "review_request",
     payload: { conversationId: id },
   });
-  await enqueueNotification({
+  await dispatchNotification({
     recipientAccountId: conv.lawyerAccountId,
     type: "review_request",
     payload: { conversationId: id },

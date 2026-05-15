@@ -17,7 +17,7 @@ import {
 } from "../dao/request";
 import { paginate, buildPagination } from "../helpers/pagination";
 import { computeRelevanceScore } from "../services/matchmaking";
-import { enqueueNotification } from "../services/notification";
+import { dispatchNotification } from "../services/notification";
 import { emitToAccount } from "../realtime/emitter";
 import { maskAccount } from "../services/anonymity";
 
@@ -65,7 +65,7 @@ export const _createRequest = async (
     expiresAt,
   });
 
-  await enqueueNotification({
+  await dispatchNotification({
     recipientAccountId: body.lawyerAccountId,
     type: "new_request",
     payload: { requestId: request.id, matter: body.intakePayload?.matter },
@@ -217,7 +217,7 @@ export const _acceptLead = async (
     return { request: updated, conversation };
   });
 
-  await enqueueNotification({
+  await dispatchNotification({
     recipientAccountId: result.request.userAccountId,
     type: "request_accepted",
     payload: {
@@ -253,7 +253,7 @@ export const _declineLead = async (
   if (r.lawyerAccountId !== lawyerAccountId) throw forbidden("Not your lead");
   if (r.status !== "pending") throw conflict("Lead no longer pending");
   const updated = await declineRequest(id, reason);
-  await enqueueNotification({
+  await dispatchNotification({
     recipientAccountId: r.userAccountId,
     type: "request_declined",
     payload: { requestId: id, reason },

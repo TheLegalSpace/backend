@@ -1,6 +1,6 @@
 import cron from "node-cron";
 import { prisma } from "../config/database";
-import { enqueueNotification } from "../services/notification";
+import { dispatchNotification } from "../services/notification";
 
 export const startStaleRequestJob = () => {
   cron.schedule("0 * * * *", async () => {
@@ -15,7 +15,7 @@ export const startStaleRequestJob = () => {
       data: { status: "expired" },
     });
     for (const s of stale) {
-      await enqueueNotification({
+      await dispatchNotification({
         recipientAccountId: s.userAccountId,
         type: "request_expired",
         payload: { requestId: s.id },
