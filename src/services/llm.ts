@@ -13,10 +13,12 @@ export interface ExtractedIntake {
 export class ExtractionInsufficientError extends Error {
   statusCode = 422;
   extracted: ExtractedIntake;
-  constructor(message: string, extracted: ExtractedIntake) {
+  text: string;
+  constructor(message: string, extracted: ExtractedIntake, text: string) {
     super(message);
     this.name = "ExtractionInsufficientError";
     this.extracted = extracted;
+    this.text = text;
   }
 }
 

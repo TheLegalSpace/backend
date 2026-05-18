@@ -56,7 +56,7 @@ export const searchByText = async (req: FastifyRequest, reply: FastifyReply) => 
       return reply.status(422).send({
         error: true,
         message: e.message,
-        data: { extracted: e.extracted },
+        data: { text: e.text, extracted: e.extracted },
       });
     }
     return responseBad(reply, e);

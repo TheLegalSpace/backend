@@ -99,7 +99,8 @@ export const _searchByText = async (
   if (!hasMatter || !hasBudgetOrLocation) {
     throw new ExtractionInsufficientError(
       buildIntakeFloorMessage(extracted),
-      extracted
+      extracted,
+      trimmed
     );
   }
 
@@ -125,6 +126,7 @@ export const _searchByText = async (
     data: {
       items: decorated,
       pagination: buildPagination(total, p, l),
+      text: trimmed,
       extracted,
     },
   });
