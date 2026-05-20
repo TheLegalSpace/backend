@@ -1,8 +1,9 @@
 import { FastifyRequest, FastifyReply } from "fastify";
 import {
-  _registerUser,
-  _registerLawyer,
-  _registerFirm,
+  _registerStart,
+  _registerResend,
+  _registerVerify,
+  _registerGoogle,
   _login,
   _refresh,
   _logout,
@@ -12,28 +13,34 @@ import {
 } from "../logic/auth";
 import { responseOk, responseCreated, responseBad } from "../helpers/utility";
 
-export const registerUser = async (req: FastifyRequest, reply: FastifyReply) => {
+export const registerStart = async (req: FastifyRequest, reply: FastifyReply) => {
   try {
-    const result = await _registerUser(req.body as any);
-    return responseCreated(reply, result);
+    return responseOk(reply, await _registerStart(req.body as any));
   } catch (error) {
     return responseBad(reply, error);
   }
 };
 
-export const registerLawyer = async (req: FastifyRequest, reply: FastifyReply) => {
+export const registerResend = async (req: FastifyRequest, reply: FastifyReply) => {
   try {
-    const result = await _registerLawyer(req.body as any);
-    return responseCreated(reply, result);
+    const { email } = req.body as { email: string };
+    return responseOk(reply, await _registerResend(email));
   } catch (error) {
     return responseBad(reply, error);
   }
 };
 
-export const registerFirm = async (req: FastifyRequest, reply: FastifyReply) => {
+export const registerVerify = async (req: FastifyRequest, reply: FastifyReply) => {
   try {
-    const result = await _registerFirm(req.body as any);
-    return responseCreated(reply, result);
+    return responseCreated(reply, await _registerVerify(req.body as any));
+  } catch (error) {
+    return responseBad(reply, error);
+  }
+};
+
+export const registerGoogle = async (req: FastifyRequest, reply: FastifyReply) => {
+  try {
+    return responseCreated(reply, await _registerGoogle(req.body as any));
   } catch (error) {
     return responseBad(reply, error);
   }
@@ -41,8 +48,7 @@ export const registerFirm = async (req: FastifyRequest, reply: FastifyReply) => 
 
 export const login = async (req: FastifyRequest, reply: FastifyReply) => {
   try {
-    const result = await _login(req.body as any);
-    return responseOk(reply, result);
+    return responseOk(reply, await _login(req.body as any));
   } catch (error) {
     return responseBad(reply, error);
   }
@@ -51,8 +57,7 @@ export const login = async (req: FastifyRequest, reply: FastifyReply) => {
 export const refresh = async (req: FastifyRequest, reply: FastifyReply) => {
   try {
     const { refreshToken } = req.body as { refreshToken: string };
-    const result = await _refresh(refreshToken);
-    return responseOk(reply, result);
+    return responseOk(reply, await _refresh(refreshToken));
   } catch (error) {
     return responseBad(reply, error);
   }
@@ -62,8 +67,7 @@ export const logout = async (req: FastifyRequest, reply: FastifyReply) => {
   try {
     const header = req.headers.authorization || "";
     const token = header.startsWith("Bearer ") ? header.slice(7) : "";
-    const result = await _logout(req.account?.authUserId, token);
-    return responseOk(reply, result);
+    return responseOk(reply, await _logout(req.account?.authUserId, token));
   } catch (error) {
     return responseBad(reply, error);
   }
@@ -72,8 +76,7 @@ export const logout = async (req: FastifyRequest, reply: FastifyReply) => {
 export const forgotPassword = async (req: FastifyRequest, reply: FastifyReply) => {
   try {
     const { email } = req.body as { email: string };
-    const result = await _forgotPassword(email);
-    return responseOk(reply, result);
+    return responseOk(reply, await _forgotPassword(email));
   } catch (error) {
     return responseBad(reply, error);
   }
@@ -82,8 +85,7 @@ export const forgotPassword = async (req: FastifyRequest, reply: FastifyReply) =
 export const resetPassword = async (req: FastifyRequest, reply: FastifyReply) => {
   try {
     const { token, newPassword } = req.body as { token: string; newPassword: string };
-    const result = await _resetPassword(token, newPassword);
-    return responseOk(reply, result);
+    return responseOk(reply, await _resetPassword(token, newPassword));
   } catch (error) {
     return responseBad(reply, error);
   }
@@ -91,8 +93,7 @@ export const resetPassword = async (req: FastifyRequest, reply: FastifyReply) =>
 
 export const deleteAccount = async (req: FastifyRequest, reply: FastifyReply) => {
   try {
-    const result = await _deleteAccount(req.account.id, req.account.authUserId);
-    return responseOk(reply, result);
+    return responseOk(reply, await _deleteAccount(req.account.id, req.account.authUserId));
   } catch (error) {
     return responseBad(reply, error);
   }

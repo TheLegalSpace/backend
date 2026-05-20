@@ -15,6 +15,9 @@ import {
   getProfileArticles,
   getProfileReviews,
   getProfilePosts,
+  setupLawyer,
+  setupFirm,
+  uploadVerificationDocument,
 } from "../controller/profile";
 import {
   updateProfileSchema,
@@ -22,6 +25,9 @@ import {
   updatePracticeAreasSchema,
   updateLawyerSchema,
   updateFirmSchema,
+  lawyerSetupSchema,
+  firmSetupSchema,
+  verificationDocSchema,
   paginationQuery,
 } from "../dto/profile";
 
@@ -52,6 +58,21 @@ export default async function profileRoutes(fastify: FastifyInstance) {
     "/me/firm",
     { schema: updateFirmSchema, preHandler: requireRole("FIRM") },
     updateFirm
+  );
+  fastify.post(
+    "/me/lawyer/setup",
+    { schema: lawyerSetupSchema, preHandler: requireRole("LAWYER") },
+    setupLawyer
+  );
+  fastify.post(
+    "/me/firm/setup",
+    { schema: firmSetupSchema, preHandler: requireRole("FIRM") },
+    setupFirm
+  );
+  fastify.post(
+    "/me/verification/document",
+    { schema: verificationDocSchema, preHandler: requireRole("LAWYER", "FIRM") },
+    uploadVerificationDocument
   );
 
   fastify.get("/:accountId/connections", { schema: { querystring: paginationQuery } }, getConnections);

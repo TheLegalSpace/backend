@@ -36,10 +36,10 @@ export const updateLawyerSchema = {
   body: {
     type: "object",
     properties: {
+      firstName: { type: "string", minLength: 1, maxLength: 80 },
+      lastName: { type: "string", minLength: 1, maxLength: 80 },
       callToBarYear: { type: "integer", minimum: 1900, maximum: 2100 },
       nbaBranch: { type: "string", maxLength: 100 },
-      feeRangeMin: { type: "integer", minimum: 0 },
-      feeRangeMax: { type: "integer", minimum: 0 },
     },
   },
 };
@@ -50,8 +50,96 @@ export const updateFirmSchema = {
     properties: {
       firmName: { type: "string", minLength: 1, maxLength: 200 },
       firmEstablishmentYear: { type: "integer", minimum: 1800, maximum: 2100 },
-      feeRangeMin: { type: "integer", minimum: 0 },
-      feeRangeMax: { type: "integer", minimum: 0 },
+      officeAddress: { type: "string", maxLength: 500 },
+    },
+  },
+};
+
+const serviceItemSchema = {
+  type: "object",
+  required: ["practiceAreaId", "name", "price"],
+  properties: {
+    practiceAreaId: { type: "string", format: "uuid" },
+    name: { type: "string", minLength: 1, maxLength: 200 },
+    price: { type: "integer", minimum: 0 },
+  },
+};
+
+export const lawyerSetupSchema = {
+  body: {
+    type: "object",
+    required: [
+      "firstName",
+      "lastName",
+      "whatsappNumber",
+      "callToBarYear",
+      "locationCity",
+      "practiceAreaIds",
+      "services",
+    ],
+    properties: {
+      firstName: { type: "string", minLength: 1, maxLength: 80 },
+      lastName: { type: "string", minLength: 1, maxLength: 80 },
+      whatsappNumber: { type: "string", minLength: 4, maxLength: 30 },
+      callToBarYear: { type: "integer", minimum: 1900, maximum: 2100 },
+      locationCity: { type: "string", minLength: 1, maxLength: 80 },
+      locationCountry: { type: "string", maxLength: 80 },
+      practiceAreaIds: {
+        type: "array",
+        minItems: 1,
+        items: { type: "string", format: "uuid" },
+      },
+      services: {
+        type: "array",
+        minItems: 1,
+        items: serviceItemSchema,
+      },
+    },
+  },
+};
+
+export const firmSetupSchema = {
+  body: {
+    type: "object",
+    required: [
+      "firmName",
+      "whatsappNumber",
+      "officeAddress",
+      "firmEstablishmentYear",
+      "locationCity",
+      "practiceAreaIds",
+      "services",
+    ],
+    properties: {
+      firmName: { type: "string", minLength: 1, maxLength: 200 },
+      whatsappNumber: { type: "string", minLength: 4, maxLength: 30 },
+      officeAddress: { type: "string", minLength: 1, maxLength: 500 },
+      firmEstablishmentYear: { type: "integer", minimum: 1800, maximum: 2100 },
+      locationCity: { type: "string", minLength: 1, maxLength: 80 },
+      locationCountry: { type: "string", maxLength: 80 },
+      practiceAreaIds: {
+        type: "array",
+        minItems: 1,
+        items: { type: "string", format: "uuid" },
+      },
+      services: {
+        type: "array",
+        minItems: 1,
+        items: serviceItemSchema,
+      },
+    },
+  },
+};
+
+export const verificationDocSchema = {
+  querystring: {
+    type: "object",
+    required: ["docType"],
+    properties: {
+      docType: {
+        type: "string",
+        enum: ["call_to_bar_cert", "practicing_cert", "id_card", "cac_cert"],
+      },
     },
   },
 };

@@ -18,8 +18,6 @@ export const updateLawyerProfile = async (
   data: {
     callToBarYear?: number;
     nbaBranch?: string;
-    feeRangeMin?: number;
-    feeRangeMax?: number;
   }
 ) => {
   return prisma.lawyerProfile.update({ where: { accountId }, data });
@@ -30,8 +28,7 @@ export const updateFirmProfile = async (
   data: {
     firmName?: string;
     firmEstablishmentYear?: number;
-    feeRangeMin?: number;
-    feeRangeMax?: number;
+    officeAddress?: string;
   }
 ) => {
   if (data.firmName) {

@@ -1,96 +1,44 @@
-const emailPath = {
-  authProvider: { type: "string", enum: ["email"] },
-  email: { type: "string", format: "email" },
-  password: { type: "string", minLength: 8 },
-};
-
-const googlePath = {
-  authProvider: { type: "string", enum: ["google"] },
-  idToken: { type: "string", minLength: 10 },
-};
-
-export const registerUserSchema = {
+export const registerStartSchema = {
   body: {
     type: "object",
-    required: ["authProvider", "fullName"],
+    required: ["email", "password", "role"],
     properties: {
-      ...emailPath,
-      ...googlePath,
-      authProvider: { type: "string", enum: ["email", "google"] },
-      fullName: { type: "string", minLength: 1, maxLength: 100 },
       email: { type: "string", format: "email" },
       password: { type: "string", minLength: 8 },
-      idToken: { type: "string" },
+      role: { type: "string", enum: ["USER", "LAWYER", "FIRM"] },
     },
   },
 };
 
-export const registerLawyerSchema = {
+export const registerVerifySchema = {
   body: {
     type: "object",
-    required: [
-      "authProvider",
-      "fullName",
-      "scn",
-      "callToBarYear",
-      "practiceAreaIds",
-      "feeRangeMin",
-      "feeRangeMax",
-      "locationCity",
-    ],
+    required: ["email", "otp"],
     properties: {
-      authProvider: { type: "string", enum: ["email", "google"] },
-      fullName: { type: "string", minLength: 1, maxLength: 100 },
       email: { type: "string", format: "email" },
-      password: { type: "string", minLength: 8 },
-      idToken: { type: "string" },
-      scn: { type: "string", minLength: 3, maxLength: 32 },
-      callToBarYear: { type: "integer", minimum: 1900, maximum: 2100 },
-      nbaBranch: { type: "string", maxLength: 100 },
-      practiceAreaIds: {
-        type: "array",
-        minItems: 1,
-        items: { type: "string", format: "uuid" },
-      },
-      feeRangeMin: { type: "integer", minimum: 0 },
-      feeRangeMax: { type: "integer", minimum: 0 },
-      locationCity: { type: "string", minLength: 1, maxLength: 80 },
-      locationCountry: { type: "string", maxLength: 80 },
+      otp: { type: "string", minLength: 4, maxLength: 10 },
     },
   },
 };
 
-export const registerFirmSchema = {
+export const registerResendSchema = {
   body: {
     type: "object",
-    required: [
-      "authProvider",
-      "firmName",
-      "rcNumber",
-      "firmEstablishmentYear",
-      "practiceAreaIds",
-      "feeRangeMin",
-      "feeRangeMax",
-      "locationCity",
-    ],
+    required: ["email"],
     properties: {
-      authProvider: { type: "string", enum: ["email", "google"] },
-      firmName: { type: "string", minLength: 1, maxLength: 200 },
       email: { type: "string", format: "email" },
-      password: { type: "string", minLength: 8 },
-      idToken: { type: "string" },
-      rcNumber: { type: "string", minLength: 3, maxLength: 32 },
-      firmEstablishmentYear: { type: "integer", minimum: 1800, maximum: 2100 },
-      verifyingPartnerScn: { type: "string", maxLength: 32 },
-      practiceAreaIds: {
-        type: "array",
-        minItems: 1,
-        items: { type: "string", format: "uuid" },
-      },
-      feeRangeMin: { type: "integer", minimum: 0 },
-      feeRangeMax: { type: "integer", minimum: 0 },
-      locationCity: { type: "string", minLength: 1, maxLength: 80 },
-      locationCountry: { type: "string", maxLength: 80 },
+    },
+  },
+};
+
+export const registerGoogleSchema = {
+  body: {
+    type: "object",
+    required: ["idToken", "role"],
+    properties: {
+      idToken: { type: "string", minLength: 10 },
+      role: { type: "string", enum: ["USER", "LAWYER", "FIRM"] },
+      fullName: { type: "string", maxLength: 100 },
     },
   },
 };

@@ -13,8 +13,11 @@ import {
   _getProfileArticles,
   _getProfileReviews,
   _getProfilePosts,
+  _setupLawyer,
+  _setupFirm,
+  _uploadVerificationDocument,
 } from "../logic/profile";
-import { responseOk, responseBad } from "../helpers/utility";
+import { responseOk, responseCreated, responseBad } from "../helpers/utility";
 
 export const getMe = async (req: FastifyRequest, reply: FastifyReply) => {
   try {
@@ -135,6 +138,43 @@ export const getProfilePosts = async (req: FastifyRequest, reply: FastifyReply) 
     const { accountId } = req.params as { accountId: string };
     const { page, limit } = req.query as any;
     return responseOk(reply, await _getProfilePosts(accountId, req.account.id, page, limit));
+  } catch (e) {
+    return responseBad(reply, e);
+  }
+};
+
+export const setupLawyer = async (req: FastifyRequest, reply: FastifyReply) => {
+  try {
+    return responseCreated(reply, await _setupLawyer(req.account.id, req.body as any));
+  } catch (e) {
+    return responseBad(reply, e);
+  }
+};
+
+export const setupFirm = async (req: FastifyRequest, reply: FastifyReply) => {
+  try {
+    return responseCreated(reply, await _setupFirm(req.account.id, req.body as any));
+  } catch (e) {
+    return responseBad(reply, e);
+  }
+};
+
+export const uploadVerificationDocument = async (req: FastifyRequest, reply: FastifyReply) => {
+  try {
+    const { docType } = req.query as { docType: string };
+    const { buffer, mimetype, filename } = await consumeFile(req);
+    return responseCreated(
+      reply,
+      await _uploadVerificationDocument(
+        req.account.id,
+        req.account.authUserId,
+        req.account.role,
+        docType,
+        buffer,
+        mimetype,
+        filename
+      )
+    );
   } catch (e) {
     return responseBad(reply, e);
   }

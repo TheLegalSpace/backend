@@ -16,6 +16,8 @@ model Account {
   role            String
   status          String    @default("active")
   fullName        String    @map("full_name")
+  firstName       String?   @map("first_name")
+  lastName        String?   @map("last_name")
   avatarUrl       String?   @map("avatar_url")
   coverUrl        String?   @map("cover_url")
   bio             String?
@@ -35,6 +37,7 @@ model Account {
   lawyerProfile     LawyerProfile?
   firmProfile       FirmProfile?
   practiceAreaLinks AccountPracticeArea[]
+  serviceOfferings  ServiceOffering[]
   posts             Post[]
   postReactions     PostReaction[]
   followsAsFollower Follow[]              @relation("Follower")
@@ -87,6 +90,7 @@ model FirmProfile {
   firmName                  String   @map("firm_name")
   rcNumber                  String?  @unique @map("rc_number")
   firmEstablishmentYear     Int      @map("firm_establishment_year")
+  officeAddress             String?  @map("office_address")
   verifyingPartnerAccountId String?  @map("verifying_partner_account_id") @db.Uuid
   verifyingPartnerScn       String?  @map("verifying_partner_scn")
   feeRangeMin               Int      @default(0) @map("fee_range_min")
@@ -111,9 +115,26 @@ model PracticeArea {
   isActive  Boolean  @default(true) @map("is_active")
   createdAt DateTime @default(now()) @map("created_at")
 
-  accountLinks AccountPracticeArea[]
+  accountLinks     AccountPracticeArea[]
+  serviceOfferings ServiceOffering[]
 
   @@map("practice_areas")
+}
+
+model ServiceOffering {
+  id             String   @id @default(uuid()) @db.Uuid
+  accountId      String   @map("account_id") @db.Uuid
+  practiceAreaId String   @map("practice_area_id") @db.Uuid
+  name           String
+  price          Int
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @updatedAt @map("updated_at")
+
+  account      Account      @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  practiceArea PracticeArea @relation(fields: [practiceAreaId], references: [id], onDelete: Cascade)
+
+  @@index([accountId, practiceAreaId])
+  @@map("service_offerings")
 }
 
 model AccountPracticeArea {

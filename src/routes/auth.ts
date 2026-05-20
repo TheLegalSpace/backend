@@ -1,8 +1,9 @@
 import { FastifyInstance } from "fastify";
 import {
-  registerUser,
-  registerLawyer,
-  registerFirm,
+  registerStart,
+  registerResend,
+  registerVerify,
+  registerGoogle,
   login,
   refresh,
   logout,
@@ -11,9 +12,10 @@ import {
   deleteAccount,
 } from "../controller/auth";
 import {
-  registerUserSchema,
-  registerLawyerSchema,
-  registerFirmSchema,
+  registerStartSchema,
+  registerResendSchema,
+  registerVerifySchema,
+  registerGoogleSchema,
   loginSchema,
   refreshSchema,
   forgotPasswordSchema,
@@ -22,9 +24,10 @@ import {
 import { authHook } from "../middleware/auth";
 
 export default async function authRoutes(fastify: FastifyInstance) {
-  fastify.post("/register/user", { schema: registerUserSchema }, registerUser);
-  fastify.post("/register/lawyer", { schema: registerLawyerSchema }, registerLawyer);
-  fastify.post("/register/firm", { schema: registerFirmSchema }, registerFirm);
+  fastify.post("/register/start", { schema: registerStartSchema }, registerStart);
+  fastify.post("/register/resend", { schema: registerResendSchema }, registerResend);
+  fastify.post("/register/verify", { schema: registerVerifySchema }, registerVerify);
+  fastify.post("/register/google", { schema: registerGoogleSchema }, registerGoogle);
   fastify.post("/login", { schema: loginSchema }, login);
   fastify.post("/refresh", { schema: refreshSchema }, refresh);
   fastify.post("/forgot-password", { schema: forgotPasswordSchema }, forgotPassword);

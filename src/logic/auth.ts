@@ -1,9 +1,8 @@
-import { Prisma } from "@prisma/client";
 import { prisma } from "../config/database";
 import { supabase, supabaseAdmin } from "../config/supabase";
 import { redis } from "../config/redis";
-import { response } from "../helpers/utility";
-import { Response } from "../interface";
+import { badRequest, conflict, notFound, response, unauthorized } from "../helpers/utility";
+import { Response, Role } from "../interface";
 import {
   findAccountByAuthUserId,
   findAccountByEmail,
@@ -11,385 +10,198 @@ import {
 } from "../dao/account";
 import { invalidateAccountCache } from "../middleware/auth";
 
-interface RegisterUserBody {
-  authProvider: "email" | "google";
-  fullName: string;
-  email?: string;
-  password?: string;
-  idToken?: string;
+const ROLE_KEY = (email: string) => `register:role:${email.toLowerCase()}`;
+const ROLE_TTL_SECONDS = 24 * 60 * 60;
+
+const placeholderName = (email: string) => {
+  const local = email.split("@")[0] || "user";
+  return local.slice(0, 80);
+};
+
+const sessionFrom = (s: any) => ({
+  accessToken: s.access_token,
+  refreshToken: s.refresh_token,
+  expiresAt: s.expires_at,
+});
+
+interface RegisterStartBody {
+  email: string;
+  password: string;
+  role: Role;
 }
 
-interface RegisterLawyerBody extends RegisterUserBody {
-  scn: string;
-  callToBarYear: number;
-  nbaBranch?: string;
-  practiceAreaIds: string[];
-  feeRangeMin: number;
-  feeRangeMax: number;
-  locationCity: string;
-  locationCountry?: string;
-}
+export const _registerStart = async (body: RegisterStartBody): Promise<Response> => {
+  if (body.role === "ADMIN") throw badRequest("Cannot self-register as ADMIN");
 
-interface RegisterFirmBody {
-  authProvider: "email" | "google";
-  firmName: string;
-  email?: string;
-  password?: string;
-  idToken?: string;
-  rcNumber: string;
-  firmEstablishmentYear: number;
-  verifyingPartnerScn?: string;
-  practiceAreaIds: string[];
-  feeRangeMin: number;
-  feeRangeMax: number;
-  locationCity: string;
-  locationCountry?: string;
-}
+  const existing = await findAccountByEmail(body.email);
+  if (existing && existing.status !== "deleted") {
+    throw conflict("An account with this email already exists");
+  }
 
-const supabaseSignUp = async (
-  email: string,
-  password: string
-): Promise<{ authUserId: string }> => {
-  const { data, error } = await supabaseAdmin.auth.admin.createUser({
-    email,
-    password,
-    email_confirm: true,
+  const created = await supabaseAdmin.auth.admin.createUser({
+    email: body.email,
+    password: body.password,
+    email_confirm: false,
   });
-  if (error || !data?.user) {
-    throw new Error(error?.message || "Failed to create auth user");
+  if (created.error) {
+    // If the user already exists in Supabase (orphaned from a previous attempt), just resend the OTP.
+    if (
+      created.error.message?.toLowerCase().includes("already") ||
+      (created.error as any).status === 422
+    ) {
+      // fall through to resend
+    } else {
+      throw new Error(created.error.message || "Failed to create auth user");
+    }
   }
-  return { authUserId: data.user.id };
+
+  const resent = await supabase.auth.resend({ type: "signup", email: body.email });
+  if (resent.error) {
+    throw new Error(resent.error.message || "Failed to send verification code");
+  }
+
+  await redis.set(ROLE_KEY(body.email), body.role, "EX", ROLE_TTL_SECONDS).catch(() => null);
+
+  return response({
+    error: false,
+    message: "Verification code sent to email",
+    data: { email: body.email },
+  });
 };
 
-const supabaseSignInPassword = async (email: string, password: string) => {
-  const { data, error } = await supabase.auth.signInWithPassword({ email, password });
-  if (error || !data?.session) {
-    throw new Error(error?.message || "Login failed");
+export const _registerResend = async (email: string): Promise<Response> => {
+  const resent = await supabase.auth.resend({ type: "signup", email });
+  if (resent.error) {
+    throw new Error(resent.error.message || "Failed to resend verification code");
   }
-  return {
-    authUserId: data.user.id,
-    session: {
-      accessToken: data.session.access_token,
-      refreshToken: data.session.refresh_token,
-      expiresAt: data.session.expires_at,
+  return response({
+    error: false,
+    message: "Verification code resent",
+    data: { email },
+  });
+};
+
+interface RegisterVerifyBody {
+  email: string;
+  otp: string;
+}
+
+export const _registerVerify = async (body: RegisterVerifyBody): Promise<Response> => {
+  const { data, error } = await supabase.auth.verifyOtp({
+    email: body.email,
+    token: body.otp,
+    type: "signup",
+  });
+  if (error || !data?.session || !data?.user) {
+    throw unauthorized(error?.message || "Invalid or expired verification code");
+  }
+
+  const authUserId = data.user.id;
+  const session = sessionFrom(data.session);
+
+  const existing = await findAccountByAuthUserId(authUserId);
+  if (existing) {
+    await invalidateAccountCache(authUserId);
+    return response({
+      error: false,
+      message: "Account already exists",
+      data: { account: existing, session },
+    });
+  }
+
+  const roleRaw = await redis.get(ROLE_KEY(body.email)).catch(() => null);
+  const role = (roleRaw as Role) || "USER";
+
+  const account = await prisma.account.create({
+    data: {
+      authUserId,
+      email: body.email,
+      fullName: placeholderName(body.email),
+      role,
+      status: "active",
     },
-    email: data.user.email!,
-  };
+    include: {
+      lawyerProfile: true,
+      firmProfile: true,
+      practiceAreaLinks: { include: { practiceArea: true } },
+    },
+  });
+
+  await redis.del(ROLE_KEY(body.email)).catch(() => null);
+  await invalidateAccountCache(authUserId);
+
+  return response({
+    error: false,
+    message: "Registration successful",
+    data: { account, session },
+  });
 };
 
-const supabaseSignInGoogle = async (idToken: string) => {
-  console.log("[AUTH] Google sign-in attempt");
-  console.log("[AUTH] Token preview:", idToken.substring(0, 20) + "...[truncated]");
-  console.log("[AUTH] Token length:", idToken.length);
+interface RegisterGoogleBody {
+  idToken: string;
+  role: Role;
+  fullName?: string;
+}
+
+export const _registerGoogle = async (body: RegisterGoogleBody): Promise<Response> => {
+  if (body.role === "ADMIN") throw badRequest("Cannot self-register as ADMIN");
 
   const { data, error } = await supabase.auth.signInWithIdToken({
     provider: "google",
-    token: idToken,
+    token: body.idToken,
   });
+  if (error || !data?.session || !data?.user) {
+    throw unauthorized(error?.message || "Google sign-in failed");
+  }
 
-  if (error) {
-    console.error("[AUTH] Google sign-in error:", {
-      message: error.message,
-      status: error.status,
-      statusCode: (error as any).statusCode,
-      fullError: JSON.stringify(error, null, 2),
+  const authUserId = data.user.id;
+  const email = data.user.email!;
+  const session = sessionFrom(data.session);
+
+  const existing = await findAccountByAuthUserId(authUserId);
+  if (existing) {
+    await invalidateAccountCache(authUserId);
+    return response({
+      error: false,
+      message: "Logged in",
+      data: { account: existing, session, isNew: false },
     });
   }
 
-  if (error || !data?.session) {
-    throw new Error(error?.message || "Google sign-in failed");
-  }
+  const meta = (data.user.user_metadata || {}) as any;
+  const fullName =
+    body.fullName?.trim() ||
+    meta.full_name ||
+    meta.name ||
+    placeholderName(email);
 
-  console.log("[AUTH] Google sign-in success:", { authUserId: data.user.id });
-  return {
-    authUserId: data.user.id,
-    session: {
-      accessToken: data.session.access_token,
-      refreshToken: data.session.refresh_token,
-      expiresAt: data.session.expires_at,
+  const firstName: string | null = meta.given_name || null;
+  const lastName: string | null = meta.family_name || null;
+
+  const account = await prisma.account.create({
+    data: {
+      authUserId,
+      email,
+      fullName,
+      firstName: body.role === "LAWYER" || body.role === "USER" ? firstName : null,
+      lastName: body.role === "LAWYER" || body.role === "USER" ? lastName : null,
+      role: body.role,
+      status: "active",
     },
-    email: data.user.email!,
-    metadata: data.user.user_metadata || {},
-  };
-};
-
-const supabaseDeleteUser = async (authUserId: string) => {
-  await supabaseAdmin.auth.admin.deleteUser(authUserId).catch(() => null);
-};
-
-const sessionFromSignIn = (s: any) => ({
-  accessToken: s.accessToken,
-  refreshToken: s.refreshToken,
-  expiresAt: s.expiresAt,
-});
-
-const buildLoginResponse = async (authUserId: string, session: any) => {
-  const account = await findAccountByAuthUserId(authUserId);
-  return { account, session };
-};
-
-export const _registerUser = async (body: RegisterUserBody): Promise<Response> => {
-  if (body.authProvider === "email") {
-    if (!body.email || !body.password) throw new Error("Email and password are required");
-    const existing = await findAccountByEmail(body.email);
-    if (existing) {
-      const signed = await supabaseSignInPassword(body.email, body.password);
-      const account = await findAccountByAuthUserId(signed.authUserId);
-      return response({
-        error: false,
-        message: "Account already exists — logged in",
-        data: { account, session: sessionFromSignIn(signed.session) },
-      });
-    }
-    const { authUserId } = await supabaseSignUp(body.email, body.password);
-    try {
-      const account = await prisma.account.create({
-        data: {
-          authUserId,
-          email: body.email,
-          fullName: body.fullName,
-          role: "USER",
-          status: "active",
-        },
-      });
-      const signed = await supabaseSignInPassword(body.email, body.password);
-      return response({
-        error: false,
-        message: "Registration successful",
-        data: { account, session: sessionFromSignIn(signed.session) },
-      });
-    } catch (err) {
-      await supabaseDeleteUser(authUserId);
-      throw err;
-    }
-  }
-
-  if (body.authProvider === "google") {
-    if (!body.idToken) throw new Error("idToken is required");
-    console.log("[AUTH] _registerUser Google path");
-    const signed = await supabaseSignInGoogle(body.idToken);
-    const existing = await findAccountByAuthUserId(signed.authUserId);
-    if (existing) {
-      console.log("[AUTH] Existing account found, logging in");
-      return response({
-        error: false,
-        message: "Logged in",
-        data: { account: existing, session: sessionFromSignIn(signed.session) },
-      });
-    }
-    console.log("[AUTH] New Google account, creating USER");
-    const fullName =
-      body.fullName ||
-      signed.metadata.full_name ||
-      signed.metadata.name ||
-      signed.email;
-    const account = await prisma.account.create({
-      data: {
-        authUserId: signed.authUserId,
-        email: signed.email,
-        fullName,
-        role: "USER",
-        status: "active",
-      },
-    });
-    return response({
-      error: false,
-      message: "Registration successful",
-      data: { account, session: sessionFromSignIn(signed.session) },
-    });
-  }
-
-  throw new Error("Invalid authProvider");
-};
-
-const createLawyerTransaction = async (
-  authUserId: string,
-  email: string,
-  body: RegisterLawyerBody
-) => {
-  return prisma.$transaction(async (tx) => {
-    const account = await tx.account.create({
-      data: {
-        authUserId,
-        email,
-        fullName: body.fullName,
-        role: "LAWYER",
-        status: "active",
-        locationCity: body.locationCity,
-        locationCountry: body.locationCountry || "Nigeria",
-      },
-    });
-    await tx.lawyerProfile.create({
-      data: {
-        accountId: account.id,
-        scn: body.scn,
-        callToBarYear: body.callToBarYear,
-        nbaBranch: body.nbaBranch,
-        feeRangeMin: body.feeRangeMin,
-        feeRangeMax: body.feeRangeMax,
-        verificationStatus: "verified",
-      },
-    });
-    await tx.accountPracticeArea.createMany({
-      data: body.practiceAreaIds.map((practiceAreaId) => ({
-        accountId: account.id,
-        practiceAreaId,
-      })),
-      skipDuplicates: true,
-    });
-    return tx.account.findUnique({
-      where: { id: account.id },
-      include: {
-        lawyerProfile: true,
-        firmProfile: true,
-        practiceAreaLinks: { include: { practiceArea: true } },
-      },
-    });
+    include: {
+      lawyerProfile: true,
+      firmProfile: true,
+      practiceAreaLinks: { include: { practiceArea: true } },
+    },
   });
-};
 
-export const _registerLawyer = async (body: RegisterLawyerBody): Promise<Response> => {
-  let authUserId = "";
-  let email = "";
-  let session: any = null;
+  await invalidateAccountCache(authUserId);
 
-  if (body.authProvider === "email") {
-    if (!body.email || !body.password) throw new Error("Email and password are required");
-    const existing = await findAccountByEmail(body.email);
-    if (existing) {
-      throw new Error("An account with this email already exists");
-    }
-    const created = await supabaseSignUp(body.email, body.password);
-    authUserId = created.authUserId;
-    email = body.email;
-    const signed = await supabaseSignInPassword(body.email, body.password);
-    session = signed.session;
-  } else if (body.authProvider === "google") {
-    if (!body.idToken) throw new Error("idToken is required");
-    console.log("[AUTH] _registerLawyer Google path");
-    const signed = await supabaseSignInGoogle(body.idToken);
-    authUserId = signed.authUserId;
-    email = signed.email;
-    session = signed.session;
-    const existing = await findAccountByAuthUserId(authUserId);
-    if (existing) {
-      throw new Error("This Google account is already registered");
-    }
-  } else {
-    throw new Error("Invalid authProvider");
-  }
-
-  try {
-    const account = await createLawyerTransaction(authUserId, email, body);
-    return response({
-      error: false,
-      message: "Lawyer registered",
-      data: { account, session: sessionFromSignIn(session) },
-    });
-  } catch (err) {
-    if (body.authProvider === "email") {
-      await supabaseDeleteUser(authUserId);
-    }
-    throw err;
-  }
-};
-
-const createFirmTransaction = async (
-  authUserId: string,
-  email: string,
-  body: RegisterFirmBody
-) => {
-  return prisma.$transaction(async (tx) => {
-    let verifyingPartnerAccountId: string | null = null;
-    if (body.verifyingPartnerScn) {
-      const partner = await tx.lawyerProfile.findUnique({
-        where: { scn: body.verifyingPartnerScn },
-        select: { accountId: true },
-      });
-      if (partner) verifyingPartnerAccountId = partner.accountId;
-    }
-    const account = await tx.account.create({
-      data: {
-        authUserId,
-        email,
-        fullName: body.firmName,
-        role: "FIRM",
-        status: "active",
-        locationCity: body.locationCity,
-        locationCountry: body.locationCountry || "Nigeria",
-      },
-    });
-    await tx.firmProfile.create({
-      data: {
-        accountId: account.id,
-        firmName: body.firmName,
-        rcNumber: body.rcNumber,
-        firmEstablishmentYear: body.firmEstablishmentYear,
-        verifyingPartnerAccountId,
-        verifyingPartnerScn: body.verifyingPartnerScn || null,
-        feeRangeMin: body.feeRangeMin,
-        feeRangeMax: body.feeRangeMax,
-        verificationStatus: "verified",
-      },
-    });
-    await tx.accountPracticeArea.createMany({
-      data: body.practiceAreaIds.map((practiceAreaId) => ({
-        accountId: account.id,
-        practiceAreaId,
-      })),
-      skipDuplicates: true,
-    });
-    return tx.account.findUnique({
-      where: { id: account.id },
-      include: {
-        lawyerProfile: true,
-        firmProfile: true,
-        practiceAreaLinks: { include: { practiceArea: true } },
-      },
-    });
+  return response({
+    error: false,
+    message: "Registration successful",
+    data: { account, session, isNew: true },
   });
-};
-
-export const _registerFirm = async (body: RegisterFirmBody): Promise<Response> => {
-  let authUserId = "";
-  let email = "";
-  let session: any = null;
-
-  if (body.authProvider === "email") {
-    if (!body.email || !body.password) throw new Error("Email and password are required");
-    const existing = await findAccountByEmail(body.email);
-    if (existing) throw new Error("An account with this email already exists");
-    const created = await supabaseSignUp(body.email, body.password);
-    authUserId = created.authUserId;
-    email = body.email;
-    const signed = await supabaseSignInPassword(body.email, body.password);
-    session = signed.session;
-  } else if (body.authProvider === "google") {
-    if (!body.idToken) throw new Error("idToken is required");
-    console.log("[AUTH] _registerFirm Google path");
-    const signed = await supabaseSignInGoogle(body.idToken);
-    authUserId = signed.authUserId;
-    email = signed.email;
-    session = signed.session;
-    const existing = await findAccountByAuthUserId(authUserId);
-    if (existing) throw new Error("This Google account is already registered");
-  } else {
-    throw new Error("Invalid authProvider");
-  }
-
-  try {
-    const account = await createFirmTransaction(authUserId, email, body);
-    return response({
-      error: false,
-      message: "Firm registered",
-      data: { account, session: sessionFromSignIn(session) },
-    });
-  } catch (err) {
-    if (body.authProvider === "email") {
-      await supabaseDeleteUser(authUserId);
-    }
-    throw err;
-  }
 };
 
 interface LoginBody {
@@ -400,44 +212,50 @@ interface LoginBody {
 }
 
 export const _login = async (body: LoginBody): Promise<Response> => {
-  let signed: any;
+  let authUserId: string;
+  let session: any;
+
   if (body.authProvider === "email") {
-    console.log("[AUTH] Login with email");
-    if (!body.email || !body.password) throw new Error("Email and password are required");
-    signed = await supabaseSignInPassword(body.email, body.password);
+    if (!body.email || !body.password) throw badRequest("Email and password are required");
+    const { data, error } = await supabase.auth.signInWithPassword({
+      email: body.email,
+      password: body.password,
+    });
+    if (error || !data?.session) throw unauthorized(error?.message || "Login failed");
+    authUserId = data.user.id;
+    session = sessionFrom(data.session);
+  } else if (body.authProvider === "google") {
+    if (!body.idToken) throw badRequest("idToken is required");
+    const { data, error } = await supabase.auth.signInWithIdToken({
+      provider: "google",
+      token: body.idToken,
+    });
+    if (error || !data?.session) throw unauthorized(error?.message || "Google sign-in failed");
+    authUserId = data.user.id;
+    session = sessionFrom(data.session);
   } else {
-    console.log("[AUTH] Login with Google");
-    if (!body.idToken) throw new Error("idToken is required");
-    signed = await supabaseSignInGoogle(body.idToken);
+    throw badRequest("Invalid authProvider");
   }
-  const account = await findAccountByAuthUserId(signed.authUserId);
+
+  const account = await findAccountByAuthUserId(authUserId);
   if (!account) {
-    const err: any = new Error("Account not found — please register first");
-    err.statusCode = 404;
-    throw err;
+    throw notFound("Account not found — please register first");
   }
-  console.log("[AUTH] Login successful:", { accountId: account.id });
-  await invalidateAccountCache(signed.authUserId);
+  await invalidateAccountCache(authUserId);
   return response({
     error: false,
     message: "Login successful",
-    data: { account, session: sessionFromSignIn(signed.session) },
+    data: { account, session },
   });
 };
 
 export const _refresh = async (refreshToken: string): Promise<Response> => {
   const { data, error } = await supabase.auth.refreshSession({ refresh_token: refreshToken });
-  if (error || !data?.session) throw new Error(error?.message || "Refresh failed");
+  if (error || !data?.session) throw unauthorized(error?.message || "Refresh failed");
   return response({
     error: false,
     message: "Token refreshed",
-    data: {
-      session: {
-        accessToken: data.session.access_token,
-        refreshToken: data.session.refresh_token,
-        expiresAt: data.session.expires_at,
-      },
-    },
+    data: { session: sessionFrom(data.session) },
   });
 };
 
@@ -461,7 +279,7 @@ export const _resetPassword = async (
     token_hash: token,
     type: "recovery",
   });
-  if (error || !data?.session) throw new Error(error?.message || "Invalid token");
+  if (error || !data?.session) throw unauthorized(error?.message || "Invalid token");
   const { error: updateErr } = await supabase.auth.updateUser({ password: newPassword });
   if (updateErr) throw new Error(updateErr.message);
   return response({ error: false, message: "Password reset successful" });
@@ -472,7 +290,7 @@ export const _deleteAccount = async (
   authUserId: string
 ): Promise<Response> => {
   await softDeleteAccount(accountId);
-  await supabaseDeleteUser(authUserId);
+  await supabaseAdmin.auth.admin.deleteUser(authUserId).catch(() => null);
   await invalidateAccountCache(authUserId);
   return response({ error: false, message: "Account deleted" });
 };
