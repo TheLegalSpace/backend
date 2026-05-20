@@ -1,7 +1,8 @@
 import { FastifyInstance } from "fastify";
 import { authHook } from "../middleware/auth";
+import { requireRole } from "../middleware/requireRole";
 import { requireOwner } from "../middleware/requireOwner";
-import { create, getById, remove, react, unreact } from "../controller/post";
+import { create, createArticle, getById, remove, react, unreact } from "../controller/post";
 
 const idParam = {
   type: "object",
@@ -21,12 +22,17 @@ export default async function postRoutes(fastify: FastifyInstance) {
           required: ["body"],
           properties: {
             body: { type: "string", minLength: 1, maxLength: 5000 },
-            attachedArticleId: { type: "string", format: "uuid" },
           },
         },
       },
+      preHandler: requireRole("LAWYER", "FIRM"),
     },
     create
+  );
+  fastify.post(
+    "/article",
+    { preHandler: requireRole("LAWYER", "FIRM") },
+    createArticle
   );
   fastify.get("/:id", { schema: { params: idParam } }, getById);
   fastify.delete(

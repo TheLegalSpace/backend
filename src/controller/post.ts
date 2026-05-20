@@ -1,6 +1,7 @@
 import { FastifyRequest, FastifyReply } from "fastify";
 import {
-  _createPost,
+  _createCaptionPost,
+  _createArticlePost,
   _getPost,
   _deletePost,
   _reactToPost,
@@ -10,7 +11,44 @@ import { responseOk, responseCreated, responseBad } from "../helpers/utility";
 
 export const create = async (req: FastifyRequest, reply: FastifyReply) => {
   try {
-    return responseCreated(reply, await _createPost(req.account.id, req.body as any));
+    return responseCreated(reply, await _createCaptionPost(req.account.id, req.body as any));
+  } catch (e) {
+    return responseBad(reply, e);
+  }
+};
+
+export const createArticle = async (req: FastifyRequest, reply: FastifyReply) => {
+  try {
+    const parts = (req as any).parts();
+    let body = "";
+    let pdfBuffer: Buffer | null = null;
+    let pdfMimetype = "";
+    let pdfFilename = "";
+    for await (const part of parts) {
+      if (part.type === "file") {
+        if (part.fieldname === "pdf") {
+          pdfBuffer = await part.toBuffer();
+          pdfMimetype = part.mimetype;
+          pdfFilename = part.filename;
+        } else {
+          await part.toBuffer();
+        }
+      } else if (part.fieldname === "body") {
+        body = String(part.value || "");
+      }
+    }
+    if (!pdfBuffer) {
+      return responseBad(reply, new Error("PDF file is required (field name: pdf)"));
+    }
+    return responseCreated(
+      reply,
+      await _createArticlePost(req.account.id, {
+        body,
+        pdfBuffer,
+        pdfMimetype,
+        pdfFilename,
+      })
+    );
   } catch (e) {
     return responseBad(reply, e);
   }

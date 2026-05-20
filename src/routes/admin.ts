@@ -9,7 +9,6 @@ import {
   approveKyc,
   rejectKyc,
   deletePost,
-  deleteArticle,
   deleteReview,
   auditLog,
 } from "../controller/admin";
@@ -102,7 +101,6 @@ export default async function adminRoutes(fastify: FastifyInstance) {
   );
 
   fastify.delete("/posts/:id", { schema: { params: idParam } }, deletePost);
-  fastify.delete("/articles/:id", { schema: { params: idParam } }, deleteArticle);
   fastify.delete("/reviews/:id", { schema: { params: idParam } }, deleteReview);
 
   fastify.get(

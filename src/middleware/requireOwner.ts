@@ -1,16 +1,12 @@
 import { FastifyReply, FastifyRequest } from "fastify";
 import { prisma } from "../config/database";
 
-type Resource = "post" | "article" | "request" | "event";
+type Resource = "post" | "request" | "event";
 
 const fetchOwner = async (resource: Resource, id: string): Promise<string | null> => {
   switch (resource) {
     case "post": {
       const r = await prisma.post.findUnique({ where: { id }, select: { authorAccountId: true } });
-      return r?.authorAccountId ?? null;
-    }
-    case "article": {
-      const r = await prisma.article.findUnique({ where: { id }, select: { authorAccountId: true } });
       return r?.authorAccountId ?? null;
     }
     case "request": {

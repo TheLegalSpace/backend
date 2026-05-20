@@ -177,10 +177,10 @@ export const _getProfileArticles = async (
   limit: number
 ): Promise<Response> => {
   const { skip, take, page: p, limit: l } = paginate(page, limit);
-  const where = { authorAccountId: targetId, deletedAt: null, status: "published" };
+  const where = { authorAccountId: targetId, deletedAt: null, pdfUrl: { not: null } };
   const [items, total] = await Promise.all([
-    prisma.article.findMany({ where, orderBy: { publishedAt: "desc" }, skip, take }),
-    prisma.article.count({ where }),
+    prisma.post.findMany({ where, orderBy: { createdAt: "desc" }, skip, take }),
+    prisma.post.count({ where }),
   ]);
   return response({
     error: false,
@@ -229,7 +229,7 @@ export const _getProfilePosts = async (
   const [rows, total] = await Promise.all([
     prisma.post.findMany({
       where,
-      include: { author: true, attachedArticle: true },
+      include: { author: true },
       orderBy: { createdAt: "desc" },
       skip,
       take,

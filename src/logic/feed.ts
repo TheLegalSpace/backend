@@ -35,7 +35,7 @@ export const _getFeedAll = async (
   const [items, total] = await Promise.all([
     prisma.post.findMany({
       where,
-      include: { author: true, attachedArticle: true },
+      include: { author: true },
       orderBy: { createdAt: "desc" },
       skip,
       take,
@@ -91,7 +91,7 @@ export const _getFeedTopAccounts = async (
   const [items, total] = await Promise.all([
     prisma.post.findMany({
       where,
-      include: { author: true, attachedArticle: true },
+      include: { author: true },
       orderBy: { createdAt: "desc" },
       skip,
       take,
@@ -114,20 +114,20 @@ export const _getFeedArticles = async (
   limit: number
 ): Promise<Response> => {
   const { skip, take, page: p, limit: l } = paginate(page, limit);
-  const where = { status: "published", deletedAt: null };
+  const where = { pdfUrl: { not: null }, deletedAt: null };
   const [rows, total] = await Promise.all([
-    prisma.article.findMany({
+    prisma.post.findMany({
       where,
       include: { author: { include: { lawyerProfile: true, firmProfile: true } } },
-      orderBy: { publishedAt: "desc" },
+      orderBy: { createdAt: "desc" },
       skip,
       take,
     }),
-    prisma.article.count({ where }),
+    prisma.post.count({ where }),
   ]);
-  const items = rows.map((a) => ({
-    ...a,
-    author: maskAccount(a.author as any, viewerId),
+  const items = rows.map((p) => ({
+    ...p,
+    author: maskAccount(p.author as any, viewerId),
   }));
   return response({
     error: false,

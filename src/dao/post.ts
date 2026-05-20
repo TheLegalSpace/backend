@@ -3,18 +3,20 @@ import { prisma } from "../config/database";
 export const createPost = async (data: {
   authorAccountId: string;
   body: string;
-  attachedArticleId?: string | null;
+  pdfUrl?: string | null;
+  pdfName?: string | null;
+  pdfSizeBytes?: number | null;
 }) => {
   return prisma.post.create({
     data,
-    include: { author: true, attachedArticle: true },
+    include: { author: true },
   });
 };
 
 export const findPostById = async (id: string) => {
   return prisma.post.findFirst({
     where: { id, deletedAt: null },
-    include: { author: true, attachedArticle: true },
+    include: { author: true },
   });
 };
 

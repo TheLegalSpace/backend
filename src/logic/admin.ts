@@ -119,25 +119,6 @@ export const _deletePost = async (adminId: string, postId: string): Promise<Resp
   return response({ error: false, message: "Post deleted" });
 };
 
-export const _deleteArticle = async (
-  adminId: string,
-  articleId: string
-): Promise<Response> => {
-  const article = await prisma.article.findUnique({ where: { id: articleId } });
-  if (!article) throw notFound("Article not found");
-  await prisma.article.update({
-    where: { id: articleId },
-    data: { deletedAt: new Date() },
-  });
-  await recordAuditLog({
-    adminAccountId: adminId,
-    action: "article.delete",
-    targetType: "article",
-    targetId: articleId,
-  });
-  return response({ error: false, message: "Article deleted" });
-};
-
 export const _deleteReview = async (
   adminId: string,
   reviewId: string

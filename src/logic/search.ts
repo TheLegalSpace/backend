@@ -8,15 +8,16 @@ const escapeLike = (q: string) => q.replace(/%/g, "\\%").replace(/_/g, "\\_");
 
 export const _search = async (
   q: string,
-  type: "lawyer" | "firm" | "article" | "all",
+  type: "lawyer" | "firm" | "all",
   viewerId: string,
   page: number,
   limit: number
 ): Promise<Response> => {
   const { skip, take, page: p, limit: l } = paginate(page, limit);
-  const term = `%${escapeLike(q)}%`;
+  // Reserved for future regex use; suppress unused warning
+  void escapeLike;
 
-  const types = type === "all" ? ["lawyer", "firm", "article"] : [type];
+  const types = type === "all" ? ["lawyer", "firm"] : [type];
 
   const result: any = {};
   let total = 0;
@@ -64,32 +65,6 @@ export const _search = async (
       prisma.account.count({ where }),
     ]);
     result.firms = items.map((a) => maskAccount(a as any, viewerId));
-    total += count;
-  }
-
-  if (types.includes("article")) {
-    const where = {
-      status: "published",
-      deletedAt: null,
-      OR: [
-        { title: { contains: q, mode: "insensitive" as const } },
-        { body: { contains: q, mode: "insensitive" as const } },
-      ],
-    };
-    const [items, count] = await Promise.all([
-      prisma.article.findMany({
-        where,
-        include: { author: true },
-        orderBy: { publishedAt: "desc" },
-        skip,
-        take,
-      }),
-      prisma.article.count({ where }),
-    ]);
-    result.articles = items.map((a) => ({
-      ...a,
-      author: maskAccount(a.author as any, viewerId),
-    }));
     total += count;
   }
 

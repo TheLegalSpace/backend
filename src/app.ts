@@ -19,7 +19,6 @@ import profileRoutes from "./routes/profile";
 import practiceAreaRoutes from "./routes/practiceArea";
 import followRoutes from "./routes/follow";
 import postRoutes from "./routes/post";
-import articleRoutes from "./routes/article";
 import feedRoutes from "./routes/feed";
 import searchRoutes from "./routes/search";
 import matchmakingRoutes from "./routes/matchmaking";
@@ -73,7 +72,6 @@ const buildServer = async () => {
       api.register(practiceAreaRoutes, { prefix: "/practice-areas" });
       api.register(followRoutes, { prefix: "/follows" });
       api.register(postRoutes, { prefix: "/posts" });
-      api.register(articleRoutes, { prefix: "/articles" });
       api.register(feedRoutes, { prefix: "/feed" });
       api.register(searchRoutes, { prefix: "/search" });
       api.register(matchmakingRoutes, { prefix: "/matchmaking" });

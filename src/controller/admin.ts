@@ -7,7 +7,6 @@ import {
   _approveKyc,
   _rejectKyc,
   _deletePost,
-  _deleteArticle,
   _deleteReview,
   _auditLog,
 } from "../logic/admin";
@@ -76,15 +75,6 @@ export const deletePost = async (req: FastifyRequest, reply: FastifyReply) => {
   try {
     const { id } = req.params as { id: string };
     return responseOk(reply, await _deletePost(req.account.id, id));
-  } catch (e) {
-    return responseBad(reply, e);
-  }
-};
-
-export const deleteArticle = async (req: FastifyRequest, reply: FastifyReply) => {
-  try {
-    const { id } = req.params as { id: string };
-    return responseOk(reply, await _deleteArticle(req.account.id, id));
   } catch (e) {
     return responseBad(reply, e);
   }

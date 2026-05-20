@@ -1,4 +1,4 @@
-import { response, badRequest, notFound, forbidden } from "../helpers/utility";
+import { response, badRequest } from "../helpers/utility";
 import { Response } from "../interface";
 import {
   createPost,
@@ -7,31 +7,72 @@ import {
   upsertReaction,
   removeReaction,
 } from "../dao/post";
+import { notFound } from "../helpers/utility";
 import { prisma } from "../config/database";
 import { maskAccount } from "../services/anonymity";
 import { dispatchNotification } from "../services/notification";
+import { uploadToR2, MAX_ARTICLE_ASSET_BYTES } from "../services/storage";
 
-export const _createPost = async (
+const PDF_MIME = "application/pdf";
+
+const notifyFollowersOfArticle = async (authorAccountId: string, postId: string) => {
+  const followers = await prisma.follow.findMany({
+    where: { followedAccountId: authorAccountId },
+    select: { followerAccountId: true },
+  });
+  for (const f of followers) {
+    await dispatchNotification({
+      recipientAccountId: f.followerAccountId,
+      type: "article_published",
+      payload: { postId },
+    });
+  }
+};
+
+export const _createCaptionPost = async (
   authorAccountId: string,
-  body: { body: string; attachedArticleId?: string }
+  body: { body: string }
 ): Promise<Response> => {
   if (!body.body || body.body.length === 0) throw badRequest("Body is required");
   if (body.body.length > 5000) throw badRequest("Body exceeds 5000 characters");
-  if (body.attachedArticleId) {
-    const article = await prisma.article.findFirst({
-      where: { id: body.attachedArticleId, deletedAt: null },
-    });
-    if (!article) throw notFound("Article not found");
-    if (article.authorAccountId !== authorAccountId) {
-      throw forbidden("Can only attach your own article");
-    }
+  const post = await createPost({ authorAccountId, body: body.body });
+  return response({ error: false, message: "Post created", data: post });
+};
+
+export const _createArticlePost = async (
+  authorAccountId: string,
+  input: { body: string; pdfBuffer: Buffer; pdfMimetype: string; pdfFilename: string }
+): Promise<Response> => {
+  if (!input.body || input.body.length === 0) throw badRequest("Body is required");
+  if (input.body.length > 5000) throw badRequest("Body exceeds 5000 characters");
+  if (input.pdfMimetype !== PDF_MIME) throw badRequest("File must be a PDF");
+  if (!input.pdfBuffer || input.pdfBuffer.byteLength === 0) {
+    throw badRequest("PDF file is empty");
   }
+  if (input.pdfBuffer.subarray(0, 4).toString("ascii") !== "%PDF") {
+    throw badRequest("File does not appear to be a valid PDF");
+  }
+
+  const { url } = await uploadToR2({
+    buffer: input.pdfBuffer,
+    mimetype: input.pdfMimetype,
+    originalName: input.pdfFilename,
+    folder: `posts/${authorAccountId}/pdfs`,
+    maxBytes: MAX_ARTICLE_ASSET_BYTES,
+    allowPdf: true,
+  });
+
   const post = await createPost({
     authorAccountId,
-    body: body.body,
-    attachedArticleId: body.attachedArticleId || null,
+    body: input.body,
+    pdfUrl: url,
+    pdfName: input.pdfFilename,
+    pdfSizeBytes: input.pdfBuffer.byteLength,
   });
-  return response({ error: false, message: "Post created", data: post });
+
+  await notifyFollowersOfArticle(authorAccountId, post.id);
+
+  return response({ error: false, message: "Article post created", data: post });
 };
 
 export const _getPost = async (id: string, viewerId: string): Promise<Response> => {

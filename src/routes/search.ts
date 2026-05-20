@@ -13,7 +13,7 @@ export default async function searchRoutes(fastify: FastifyInstance) {
           type: "object",
           properties: {
             q: { type: "string", default: "" },
-            type: { type: "string", enum: ["lawyer", "firm", "article", "all"], default: "all" },
+            type: { type: "string", enum: ["lawyer", "firm", "all"], default: "all" },
             page: { type: "integer", default: 1, minimum: 1 },
             limit: { type: "integer", default: 20, minimum: 1, maximum: 100 },
           },
