@@ -4,7 +4,7 @@ export interface Response<T = any> {
   data?: T;
 }
 
-export type Role = "USER" | "LAWYER" | "FIRM" | "ADMIN";
+export type Role = "USER" | "PENDING_PROFESSIONAL" | "LAWYER" | "FIRM" | "ADMIN";
 export type AccountStatus = "active" | "suspended" | "deleted";
 export type VerificationStatus = "pending" | "under_review" | "verified" | "rejected";
 

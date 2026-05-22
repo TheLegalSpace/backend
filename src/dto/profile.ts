@@ -131,6 +131,20 @@ export const firmSetupSchema = {
   },
 };
 
+export const updateServicesSchema = {
+  body: {
+    type: "object",
+    required: ["services"],
+    properties: {
+      services: {
+        type: "array",
+        minItems: 1,
+        items: serviceItemSchema,
+      },
+    },
+  },
+};
+
 export const verificationDocSchema = {
   querystring: {
     type: "object",

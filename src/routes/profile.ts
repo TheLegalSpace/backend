@@ -18,6 +18,8 @@ import {
   setupLawyer,
   setupFirm,
   uploadVerificationDocument,
+  listServices,
+  updateServices,
 } from "../controller/profile";
 import {
   updateProfileSchema,
@@ -27,6 +29,7 @@ import {
   updateFirmSchema,
   lawyerSetupSchema,
   firmSetupSchema,
+  updateServicesSchema,
   verificationDocSchema,
   paginationQuery,
 } from "../dto/profile";
@@ -49,6 +52,16 @@ export default async function profileRoutes(fastify: FastifyInstance) {
     { schema: updatePracticeAreasSchema, preHandler: requireRole("LAWYER", "FIRM") },
     updatePracticeAreas
   );
+  fastify.get(
+    "/me/services",
+    { preHandler: requireRole("LAWYER", "FIRM") },
+    listServices
+  );
+  fastify.put(
+    "/me/services",
+    { schema: updateServicesSchema, preHandler: requireRole("LAWYER", "FIRM") },
+    updateServices
+  );
   fastify.patch(
     "/me/lawyer",
     { schema: updateLawyerSchema, preHandler: requireRole("LAWYER") },
@@ -61,12 +74,12 @@ export default async function profileRoutes(fastify: FastifyInstance) {
   );
   fastify.post(
     "/me/lawyer/setup",
-    { schema: lawyerSetupSchema, preHandler: requireRole("LAWYER") },
+    { schema: lawyerSetupSchema, preHandler: requireRole("PENDING_PROFESSIONAL") },
     setupLawyer
   );
   fastify.post(
     "/me/firm/setup",
-    { schema: firmSetupSchema, preHandler: requireRole("FIRM") },
+    { schema: firmSetupSchema, preHandler: requireRole("PENDING_PROFESSIONAL") },
     setupFirm
   );
   fastify.post(

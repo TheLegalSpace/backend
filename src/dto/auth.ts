@@ -5,7 +5,7 @@ export const registerStartSchema = {
     properties: {
       email: { type: "string", format: "email" },
       password: { type: "string", minLength: 8 },
-      role: { type: "string", enum: ["USER", "LAWYER", "FIRM"] },
+      role: { type: "string", enum: ["USER", "PENDING_PROFESSIONAL"] },
     },
   },
 };
@@ -37,7 +37,7 @@ export const registerGoogleSchema = {
     required: ["idToken", "role"],
     properties: {
       idToken: { type: "string", minLength: 10 },
-      role: { type: "string", enum: ["USER", "LAWYER", "FIRM"] },
+      role: { type: "string", enum: ["USER", "PENDING_PROFESSIONAL"] },
       fullName: { type: "string", maxLength: 100 },
     },
   },

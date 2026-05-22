@@ -1,16 +1,67 @@
 import { prisma } from "../config/database";
+import type { Prisma } from "@prisma/client";
 
-export const replacePracticeAreas = async (
+type Tx = Prisma.TransactionClient;
+
+export const findServicesByAccount = async (accountId: string) => {
+  return prisma.serviceOffering.findMany({
+    where: { accountId },
+    orderBy: { createdAt: "asc" },
+  });
+};
+
+export const replaceServicesTx = async (
+  tx: Tx,
   accountId: string,
-  practiceAreaIds: string[]
+  services: { practiceAreaId: string; name: string; price: number }[]
 ) => {
-  return prisma.$transaction([
-    prisma.accountPracticeArea.deleteMany({ where: { accountId } }),
-    prisma.accountPracticeArea.createMany({
-      data: practiceAreaIds.map((practiceAreaId) => ({ accountId, practiceAreaId })),
-      skipDuplicates: true,
-    }),
-  ]);
+  await tx.serviceOffering.deleteMany({ where: { accountId } });
+  if (services.length > 0) {
+    await tx.serviceOffering.createMany({
+      data: services.map((s) => ({
+        accountId,
+        practiceAreaId: s.practiceAreaId,
+        name: s.name,
+        price: s.price,
+      })),
+    });
+  }
+};
+
+export const deleteServicesForRemovedAreasTx = async (
+  tx: Tx,
+  accountId: string,
+  removedPracticeAreaIds: string[]
+) => {
+  if (removedPracticeAreaIds.length === 0) return;
+  await tx.serviceOffering.deleteMany({
+    where: { accountId, practiceAreaId: { in: removedPracticeAreaIds } },
+  });
+};
+
+export const applyFeeRangeFromServicesTx = async (
+  tx: Tx,
+  accountId: string,
+  role: string
+) => {
+  const services = await tx.serviceOffering.findMany({
+    where: { accountId },
+    select: { price: true },
+  });
+  const feeRangeMin = services.length === 0 ? 0 : Math.min(...services.map((s) => s.price));
+  const feeRangeMax = services.length === 0 ? 0 : Math.max(...services.map((s) => s.price));
+  if (role === "LAWYER") {
+    await tx.lawyerProfile.update({
+      where: { accountId },
+      data: { feeRangeMin, feeRangeMax },
+    });
+  } else if (role === "FIRM") {
+    await tx.firmProfile.update({
+      where: { accountId },
+      data: { feeRangeMin, feeRangeMax },
+    });
+  }
+  return { feeRangeMin, feeRangeMax };
 };
 
 export const updateLawyerProfile = async (

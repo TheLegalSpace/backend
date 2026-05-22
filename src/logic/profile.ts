@@ -12,12 +12,15 @@ import {
   updateAccount,
 } from "../dao/account";
 import {
-  replacePracticeAreas,
   updateLawyerProfile,
   updateFirmProfile,
   findConnectionsForAccount,
   countConnectionsForAccount,
   isFollowing,
+  replaceServicesTx,
+  deleteServicesForRemovedAreasTx,
+  applyFeeRangeFromServicesTx,
+  findServicesByAccount,
 } from "../dao/profile";
 import { maskAccount } from "../services/anonymity";
 import { invalidateAccountCache } from "../middleware/auth";
@@ -98,13 +101,94 @@ export const _updatePracticeAreas = async (
   accountId: string,
   practiceAreaIds: string[]
 ): Promise<Response> => {
-  await replacePracticeAreas(accountId, practiceAreaIds);
-  const account = await findAccountById(accountId);
-  if (account) await invalidateAccountCache(account.authUserId);
+  const account = await prisma.account.findUnique({
+    where: { id: accountId },
+    include: { practiceAreaLinks: true },
+  });
+  if (!account) throw notFound("Account not found");
+
+  const validAreas = await prisma.practiceArea.findMany({
+    where: { id: { in: practiceAreaIds }, isActive: true },
+    select: { id: true },
+  });
+  if (validAreas.length !== new Set(practiceAreaIds).size) {
+    throw badRequest("One or more practice areas are invalid or inactive");
+  }
+
+  const incoming = new Set(practiceAreaIds);
+  const removed = account.practiceAreaLinks
+    .map((l) => l.practiceAreaId)
+    .filter((id) => !incoming.has(id));
+
+  await prisma.$transaction(async (tx) => {
+    await tx.accountPracticeArea.deleteMany({ where: { accountId } });
+    await tx.accountPracticeArea.createMany({
+      data: practiceAreaIds.map((practiceAreaId) => ({ accountId, practiceAreaId })),
+      skipDuplicates: true,
+    });
+    await deleteServicesForRemovedAreasTx(tx, accountId, removed);
+    if (removed.length > 0) {
+      await applyFeeRangeFromServicesTx(tx, accountId, account.role);
+    }
+  });
+
+  await invalidateAccountCache(account.authUserId);
+  const updated = await findAccountById(accountId);
   return response({
     error: false,
     message: "Practice areas updated",
-    data: account,
+    data: updated,
+  });
+};
+
+interface ServiceInputBody {
+  practiceAreaId: string;
+  name: string;
+  price: number;
+}
+
+export const _listServices = async (accountId: string): Promise<Response> => {
+  const items = await findServicesByAccount(accountId);
+  return response({ error: false, message: "Services retrieved", data: items });
+};
+
+export const _updateServices = async (
+  accountId: string,
+  services: ServiceInputBody[]
+): Promise<Response> => {
+  const account = await prisma.account.findUnique({
+    where: { id: accountId },
+    include: { practiceAreaLinks: true },
+  });
+  if (!account) throw notFound("Account not found");
+  if (account.role !== "LAWYER" && account.role !== "FIRM") {
+    throw forbidden("Only LAWYER or FIRM accounts can manage services");
+  }
+
+  const accountAreaIds = new Set(account.practiceAreaLinks.map((l) => l.practiceAreaId));
+  for (const s of services) {
+    if (!accountAreaIds.has(s.practiceAreaId)) {
+      throw badRequest(
+        `Service "${s.name}" references a practice area not in your selected list`
+      );
+    }
+  }
+
+  const result = await prisma.$transaction(async (tx) => {
+    await replaceServicesTx(tx, accountId, services);
+    const range = await applyFeeRangeFromServicesTx(tx, accountId, account.role);
+    const items = await tx.serviceOffering.findMany({
+      where: { accountId },
+      orderBy: { createdAt: "asc" },
+    });
+    return { items, ...range };
+  });
+
+  await invalidateAccountCache(account.authUserId);
+  return response({
+    error: false,
+    message: "Services updated",
+    data: result,
   });
 };
 
@@ -302,7 +386,7 @@ export const _setupLawyer = async (
     include: { lawyerProfile: true },
   });
   if (!account) throw notFound("Account not found");
-  if (account.role !== "LAWYER") throw forbidden("Only LAWYER accounts can run lawyer setup");
+  if (account.role !== "PENDING_PROFESSIONAL") throw forbidden("Account is not awaiting professional setup");
   if (account.lawyerProfile) throw conflict("Lawyer profile already exists");
 
   validateServices(body.services, body.practiceAreaIds);
@@ -322,6 +406,7 @@ export const _setupLawyer = async (
     await tx.account.update({
       where: { id: accountId },
       data: {
+        role: "LAWYER",
         firstName: body.firstName,
         lastName: body.lastName,
         fullName,
@@ -390,7 +475,7 @@ export const _setupFirm = async (
     include: { firmProfile: true },
   });
   if (!account) throw notFound("Account not found");
-  if (account.role !== "FIRM") throw forbidden("Only FIRM accounts can run firm setup");
+  if (account.role !== "PENDING_PROFESSIONAL") throw forbidden("Account is not awaiting professional setup");
   if (account.firmProfile) throw conflict("Firm profile already exists");
 
   validateServices(body.services, body.practiceAreaIds);
@@ -409,6 +494,7 @@ export const _setupFirm = async (
     await tx.account.update({
       where: { id: accountId },
       data: {
+        role: "FIRM",
         fullName: body.firmName,
         phone: body.whatsappNumber,
         locationCity: body.locationCity,
