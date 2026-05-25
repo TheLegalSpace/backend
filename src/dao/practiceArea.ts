@@ -8,6 +8,11 @@ export const findAllPracticeAreas = async () => {
   return prisma.practiceArea.findMany({ orderBy: { name: "asc" } });
 };
 
+export const findPracticeAreasByIds = async (ids: string[]) => {
+  if (ids.length === 0) return [];
+  return prisma.practiceArea.findMany({ where: { id: { in: ids } } });
+};
+
 export const createPracticeArea = async (name: string, slug: string) => {
   return prisma.practiceArea.create({ data: { name, slug } });
 };

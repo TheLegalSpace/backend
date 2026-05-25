@@ -15,6 +15,7 @@ export const listConversationsForAccount = async (
       include: {
         userAccount: { include: { lawyerProfile: true, firmProfile: true } },
         lawyerAccount: { include: { lawyerProfile: true, firmProfile: true } },
+        request: true,
       },
       orderBy: { lastMessageAt: { sort: "desc", nulls: "last" } },
       skip,

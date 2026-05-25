@@ -17,6 +17,7 @@ import {
   archiveConversation,
   unreadCountForAccount,
 } from "../dao/conversation";
+import { findPracticeAreasByIds } from "../dao/practiceArea";
 import { paginate, buildPagination } from "../helpers/pagination";
 import { maskAccount } from "../services/anonymity";
 import { dispatchNotification } from "../services/notification";
@@ -30,11 +31,22 @@ export const _listConversations = async (
   const { skip, take, page: p, limit: l } = paginate(page, limit);
   const { items, total } = await listConversationsForAccount(accountId, skip, take);
 
+  const matterIds = Array.from(
+    new Set(
+      items
+        .map((c) => (c.request?.intakePayload as any)?.matter)
+        .filter((m): m is string => typeof m === "string" && m.length > 0)
+    )
+  );
+  const areas = await findPracticeAreasByIds(matterIds);
+  const matterNameById = new Map(areas.map((a) => [a.id, a.name]));
+
   const decorated = await Promise.all(
     items.map(async (conv) => {
       const otherParty =
         conv.userAccountId === accountId ? conv.lawyerAccount : conv.userAccount;
       const unread = await unreadCountForAccount(conv.id, accountId);
+      const matterId = (conv.request?.intakePayload as any)?.matter;
       return {
         id: conv.id,
         status: conv.status,
@@ -42,6 +54,7 @@ export const _listConversations = async (
         lastMessagePreview: conv.lastMessagePreview,
         otherParty: maskAccount(otherParty as any, accountId),
         unreadCount: unread,
+        matterName: matterId ? matterNameById.get(matterId) ?? null : null,
       };
     })
   );
@@ -58,6 +71,8 @@ export const _getConversation = async (
 ): Promise<Response> => {
   const conv = await findConversationById(id);
   if (!conv) throw notFound("Conversation not found");
+  const matterId = (conv.request?.intakePayload as any)?.matter;
+  const [area] = matterId ? await findPracticeAreasByIds([matterId]) : [];
   return response({
     error: false,
     message: "Conversation retrieved",
@@ -65,6 +80,7 @@ export const _getConversation = async (
       ...conv,
       userAccount: maskAccount(conv.userAccount as any, viewerId),
       lawyerAccount: maskAccount(conv.lawyerAccount as any, viewerId),
+      matterName: area?.name ?? null,
     },
   });
 };
