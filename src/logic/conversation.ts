@@ -46,7 +46,9 @@ export const _listConversations = async (
       const otherParty =
         conv.userAccountId === accountId ? conv.lawyerAccount : conv.userAccount;
       const unread = await unreadCountForAccount(conv.id, accountId);
-      const matterId = (conv.request?.intakePayload as any)?.matter;
+      const intake = conv.request?.intakePayload as any;
+      const matterId = intake?.matter;
+      const freeText = typeof intake?.freeText === "string" ? intake.freeText.trim() : "";
       return {
         id: conv.id,
         status: conv.status,
@@ -55,6 +57,7 @@ export const _listConversations = async (
         otherParty: maskAccount(otherParty as any, accountId),
         unreadCount: unread,
         matterName: matterId ? matterNameById.get(matterId) ?? null : null,
+        intakeSummary: freeText ? freeText.slice(0, 60) : null,
       };
     })
   );
@@ -71,7 +74,9 @@ export const _getConversation = async (
 ): Promise<Response> => {
   const conv = await findConversationById(id);
   if (!conv) throw notFound("Conversation not found");
-  const matterId = (conv.request?.intakePayload as any)?.matter;
+  const intake = conv.request?.intakePayload as any;
+  const matterId = intake?.matter;
+  const freeText = typeof intake?.freeText === "string" ? intake.freeText.trim() : "";
   const [area] = matterId ? await findPracticeAreasByIds([matterId]) : [];
   return response({
     error: false,
@@ -81,6 +86,7 @@ export const _getConversation = async (
       userAccount: maskAccount(conv.userAccount as any, viewerId),
       lawyerAccount: maskAccount(conv.lawyerAccount as any, viewerId),
       matterName: area?.name ?? null,
+      intakeSummary: freeText ? freeText.slice(0, 60) : null,
     },
   });
 };
