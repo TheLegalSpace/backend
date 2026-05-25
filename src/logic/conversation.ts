@@ -14,6 +14,7 @@ import {
   createMessage,
   markMessageRead,
   closeConversation,
+  archiveConversation,
   unreadCountForAccount,
 } from "../dao/conversation";
 import { paginate, buildPagination } from "../helpers/pagination";
@@ -168,4 +169,19 @@ export const _closeConversation = async (
     payload: { conversationId: id },
   });
   return response({ error: false, message: "Conversation closed", data: updated });
+};
+
+export const _archiveConversation = async (
+  id: string,
+  accountId: string
+): Promise<Response> => {
+  const conv = await findConversationById(id);
+  if (!conv) throw notFound("Conversation not found");
+  if (conv.userAccountId !== accountId && conv.lawyerAccountId !== accountId) {
+    throw forbidden("Not a participant");
+  }
+  if (conv.status === "archived") throw badRequest("Already archived");
+  const updated = await archiveConversation(id);
+  emitToConversation(id, "conversation:updated", updated);
+  return response({ error: false, message: "Conversation archived", data: updated });
 };

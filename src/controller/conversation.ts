@@ -6,6 +6,7 @@ import {
   _sendMessage,
   _markRead,
   _closeConversation,
+  _archiveConversation,
 } from "../logic/conversation";
 import { responseOk, responseCreated, responseBad } from "../helpers/utility";
 
@@ -59,6 +60,15 @@ export const close = async (req: FastifyRequest, reply: FastifyReply) => {
   try {
     const { id } = req.params as { id: string };
     return responseOk(reply, await _closeConversation(id, req.account.id));
+  } catch (e) {
+    return responseBad(reply, e);
+  }
+};
+
+export const archive = async (req: FastifyRequest, reply: FastifyReply) => {
+  try {
+    const { id } = req.params as { id: string };
+    return responseOk(reply, await _archiveConversation(id, req.account.id));
   } catch (e) {
     return responseBad(reply, e);
   }

@@ -8,6 +8,7 @@ import {
   sendMessage,
   markRead,
   close,
+  archive,
 } from "../controller/conversation";
 import { paginationQuery } from "../dto/profile";
 
@@ -88,5 +89,13 @@ export default async function conversationRoutes(fastify: FastifyInstance) {
       preHandler: requireConversationParticipant,
     },
     close
+  );
+  fastify.delete(
+    "/:id",
+    {
+      schema: { params: idParam },
+      preHandler: requireConversationParticipant,
+    },
+    archive
   );
 }

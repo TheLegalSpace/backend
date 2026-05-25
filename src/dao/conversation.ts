@@ -7,6 +7,7 @@ export const listConversationsForAccount = async (
 ) => {
   const where = {
     OR: [{ userAccountId: accountId }, { lawyerAccountId: accountId }],
+    status: { not: "archived" },
   };
   const [items, total] = await Promise.all([
     prisma.conversation.findMany({
@@ -90,6 +91,13 @@ export const closeConversation = async (id: string, closedByAccountId: string) =
       closedAt: new Date(),
       closedByAccountId,
     },
+  });
+};
+
+export const archiveConversation = async (id: string) => {
+  return prisma.conversation.update({
+    where: { id },
+    data: { status: "archived" },
   });
 };
 
