@@ -56,6 +56,7 @@ model Account {
   reviewedKycDocs       VerificationDocument[] @relation("AdminKycReview")
   firmsAsVerifyingPartner FirmProfile[]   @relation("VerifyingPartner")
   adminAuditLog     AdminAuditLog[]
+  researchThreads   ResearchThread[]
 
   @@index([role, status])
   @@index([role, status, locationCity])
@@ -380,4 +381,36 @@ model AccountSettings {
   updatedAt                   DateTime @updatedAt @map("updated_at")
 
   @@map("account_settings")
+}
+
+model ResearchThread {
+  id        String    @id @default(uuid()) @db.Uuid
+  accountId String    @map("account_id") @db.Uuid
+  title     String    @default("New research")
+  pinned    Boolean   @default(false)
+  createdAt DateTime  @default(now()) @map("created_at")
+  updatedAt DateTime  @updatedAt @map("updated_at")
+  deletedAt DateTime? @map("deleted_at")
+
+  account  Account           @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  messages ResearchMessage[]
+
+  @@index([accountId, pinned, updatedAt(sort: Desc)])
+  @@map("research_threads")
+}
+
+model ResearchMessage {
+  id          String   @id @default(uuid()) @db.Uuid
+  threadId    String   @map("thread_id") @db.Uuid
+  role        String // "user" | "assistant"
+  content     String
+  attachments Json? // [{ kind:"pdf", url, filename, sizeBytes }]
+  sources     Json? // [{ title, url }] from grounding metadata
+  confident   Boolean? // assistant only; false when it returned the refusal
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  thread ResearchThread @relation(fields: [threadId], references: [id], onDelete: Cascade)
+
+  @@index([threadId, createdAt])
+  @@map("research_messages")
 }

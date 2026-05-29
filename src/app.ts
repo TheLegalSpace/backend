@@ -30,6 +30,7 @@ import notificationRoutes from "./routes/notification";
 import eventRoutes from "./routes/event";
 import settingsRoutes from "./routes/settings";
 import adminRoutes from "./routes/admin";
+import researchRoutes from "./routes/research";
 
 const buildServer = async () => {
   const app = Fastify({
@@ -83,6 +84,7 @@ const buildServer = async () => {
       api.register(eventRoutes, { prefix: "/events" });
       api.register(settingsRoutes, { prefix: "/settings" });
       api.register(adminRoutes, { prefix: "/admin" });
+      api.register(researchRoutes, { prefix: "/research" });
     },
     { prefix: env.apiPrefix }
   );

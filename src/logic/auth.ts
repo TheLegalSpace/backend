@@ -271,16 +271,37 @@ export const _forgotPassword = async (email: string): Promise<Response> => {
   return response({ error: false, message: "Password reset email sent" });
 };
 
-export const _resetPassword = async (
-  token: string,
-  newPassword: string
+export const _verifyResetCode = async (
+  email: string,
+  code: string
 ): Promise<Response> => {
   const { data, error } = await supabase.auth.verifyOtp({
-    token_hash: token,
+    email,
+    token: code,
     type: "recovery",
   });
-  if (error || !data?.session) throw unauthorized(error?.message || "Invalid token");
-  const { error: updateErr } = await supabase.auth.updateUser({ password: newPassword });
+  if (error || !data?.session) {
+    throw unauthorized(error?.message || "Invalid or expired code");
+  }
+  return response({
+    error: false,
+    message: "Code verified",
+    data: { session: sessionFrom(data.session) },
+  });
+};
+
+export const _resetPassword = async (
+  accessToken: string,
+  newPassword: string
+): Promise<Response> => {
+  const { data, error } = await supabaseAdmin.auth.getUser(accessToken);
+  if (error || !data?.user) {
+    throw unauthorized(error?.message || "Invalid or expired session");
+  }
+  const { error: updateErr } = await supabaseAdmin.auth.admin.updateUserById(
+    data.user.id,
+    { password: newPassword }
+  );
   if (updateErr) throw new Error(updateErr.message);
   return response({ error: false, message: "Password reset successful" });
 };

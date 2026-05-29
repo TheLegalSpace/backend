@@ -72,12 +72,23 @@ export const forgotPasswordSchema = {
   },
 };
 
+export const verifyResetCodeSchema = {
+  body: {
+    type: "object",
+    required: ["email", "code"],
+    properties: {
+      email: { type: "string", format: "email" },
+      code: { type: "string", minLength: 4, maxLength: 10 },
+    },
+  },
+};
+
 export const resetPasswordSchema = {
   body: {
     type: "object",
-    required: ["token", "newPassword"],
+    required: ["accessToken", "newPassword"],
     properties: {
-      token: { type: "string" },
+      accessToken: { type: "string" },
       newPassword: { type: "string", minLength: 8 },
     },
   },

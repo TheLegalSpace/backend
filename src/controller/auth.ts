@@ -8,6 +8,7 @@ import {
   _refresh,
   _logout,
   _forgotPassword,
+  _verifyResetCode,
   _resetPassword,
   _deleteAccount,
 } from "../logic/auth";
@@ -82,10 +83,22 @@ export const forgotPassword = async (req: FastifyRequest, reply: FastifyReply) =
   }
 };
 
+export const verifyResetCode = async (req: FastifyRequest, reply: FastifyReply) => {
+  try {
+    const { email, code } = req.body as { email: string; code: string };
+    return responseOk(reply, await _verifyResetCode(email, code));
+  } catch (error) {
+    return responseBad(reply, error);
+  }
+};
+
 export const resetPassword = async (req: FastifyRequest, reply: FastifyReply) => {
   try {
-    const { token, newPassword } = req.body as { token: string; newPassword: string };
-    return responseOk(reply, await _resetPassword(token, newPassword));
+    const { accessToken, newPassword } = req.body as {
+      accessToken: string;
+      newPassword: string;
+    };
+    return responseOk(reply, await _resetPassword(accessToken, newPassword));
   } catch (error) {
     return responseBad(reply, error);
   }

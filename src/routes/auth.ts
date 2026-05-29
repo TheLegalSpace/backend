@@ -8,6 +8,7 @@ import {
   refresh,
   logout,
   forgotPassword,
+  verifyResetCode,
   resetPassword,
   deleteAccount,
 } from "../controller/auth";
@@ -19,6 +20,7 @@ import {
   loginSchema,
   refreshSchema,
   forgotPasswordSchema,
+  verifyResetCodeSchema,
   resetPasswordSchema,
 } from "../dto/auth";
 import { authHook } from "../middleware/auth";
@@ -31,6 +33,7 @@ export default async function authRoutes(fastify: FastifyInstance) {
   fastify.post("/login", { schema: loginSchema }, login);
   fastify.post("/refresh", { schema: refreshSchema }, refresh);
   fastify.post("/forgot-password", { schema: forgotPasswordSchema }, forgotPassword);
+  fastify.post("/verify-reset-code", { schema: verifyResetCodeSchema }, verifyResetCode);
   fastify.post("/reset-password", { schema: resetPasswordSchema }, resetPassword);
 
   fastify.register(async (authed) => {

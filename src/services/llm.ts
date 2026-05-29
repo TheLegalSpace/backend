@@ -23,7 +23,7 @@ export class ExtractionInsufficientError extends Error {
 }
 
 let cachedClient: GoogleGenAI | null = null;
-const getClient = (): GoogleGenAI => {
+export const getClient = (): GoogleGenAI => {
   if (!env.geminiApiKey) {
     throw new Error("GEMINI_API_KEY is not configured");
   }
@@ -67,12 +67,12 @@ Extract:
 
 Be conservative — return null when uncertain rather than guessing.`;
 
-const isTransientError = (err: any): boolean => {
+export const isTransientError = (err: any): boolean => {
   const msg = String(err?.message || err || "");
   return /\b(503|429|UNAVAILABLE|RESOURCE_EXHAUSTED|overloaded|high demand)\b/i.test(msg);
 };
 
-const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+export const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 const callGeminiWithRetry = async (
   client: GoogleGenAI,
