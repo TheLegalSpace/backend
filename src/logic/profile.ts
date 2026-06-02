@@ -11,6 +11,8 @@ import {
   findAccountById,
   updateAccount,
 } from "../dao/account";
+import { totalUnreadMessagesForAccount } from "../dao/conversation";
+import { countPendingLeads } from "../dao/request";
 import {
   updateLawyerProfile,
   updateFirmProfile,
@@ -49,10 +51,18 @@ const enrichProfile = async (account: any, viewerId?: string | null) => {
 export const _getMe = async (accountId: string): Promise<Response> => {
   const account = await findAccountById(accountId);
   if (!account) throw notFound("Account not found");
+
+  const isProfessional = account.role === "LAWYER" || account.role === "FIRM";
+  const [profile, unreadMessageCount, pendingLeadCount] = await Promise.all([
+    enrichProfile(account, accountId),
+    totalUnreadMessagesForAccount(accountId),
+    isProfessional ? countPendingLeads(accountId) : Promise.resolve(0),
+  ]);
+
   return response({
     error: false,
     message: "Profile retrieved",
-    data: await enrichProfile(account, accountId),
+    data: { ...profile, unreadMessageCount, pendingLeadCount },
   });
 };
 

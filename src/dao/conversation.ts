@@ -114,3 +114,15 @@ export const unreadCountForAccount = async (
     },
   });
 };
+
+export const totalUnreadMessagesForAccount = async (accountId: string) => {
+  return prisma.message.count({
+    where: {
+      senderAccountId: { not: accountId },
+      readAt: null,
+      conversation: {
+        OR: [{ userAccountId: accountId }, { lawyerAccountId: accountId }],
+      },
+    },
+  });
+};

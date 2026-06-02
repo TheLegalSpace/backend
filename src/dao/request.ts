@@ -63,6 +63,12 @@ export const listLeads = async (
   return { items, total };
 };
 
+export const countPendingLeads = async (lawyerAccountId: string) => {
+  return prisma.request.count({
+    where: { lawyerAccountId, status: "pending" },
+  });
+};
+
 export const cancelRequest = async (id: string) => {
   return prisma.request.update({
     where: { id },
