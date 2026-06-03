@@ -117,6 +117,11 @@ export const runResearch = async (
     });
   } catch (err) {
     const detail = String((err as any)?.message || err || "unknown error");
+    console.error("[research] grounded generation failed:", {
+      detail,
+      status: (err as any)?.status ?? (err as any)?.code,
+      hasPdf: Boolean(input.pdf),
+    });
 
     if (input.pdf) {
       // Document understanding doesn't strictly need web search. Degrade to a
@@ -137,7 +142,10 @@ export const runResearch = async (
           degraded:
             "Legal source search was unavailable, so this is based only on the uploaded document and general knowledge — verify any cited cases or statutes independently.",
         };
-      } catch {
+      } catch (docErr) {
+        console.error("[research] doc-only fallback also failed:", {
+          detail: String((docErr as any)?.message || docErr || "unknown error"),
+        });
         throw serviceUnavailable(
           `The research model is temporarily unavailable. Please try again shortly. (${detail})`
         );
