@@ -11,6 +11,9 @@ import {
   deletePost,
   deleteReview,
   auditLog,
+  listServiceRequests,
+  getServiceRequest,
+  updateServiceRequest,
 } from "../controller/admin";
 
 const idParam = {
@@ -102,6 +105,48 @@ export default async function adminRoutes(fastify: FastifyInstance) {
 
   fastify.delete("/posts/:id", { schema: { params: idParam } }, deletePost);
   fastify.delete("/reviews/:id", { schema: { params: idParam } }, deleteReview);
+
+  fastify.get(
+    "/service-requests",
+    {
+      schema: {
+        querystring: {
+          type: "object",
+          properties: {
+            type: {
+              type: "string",
+              enum: ["website", "appointment", "productivity", "consulting", "event_promotion"],
+            },
+            status: { type: "string" },
+            page: { type: "integer", default: 1 },
+            limit: { type: "integer", default: 20 },
+          },
+        },
+      },
+    },
+    listServiceRequests
+  );
+  fastify.get("/service-requests/:id", { schema: { params: idParam } }, getServiceRequest);
+  fastify.patch(
+    "/service-requests/:id",
+    {
+      schema: {
+        params: idParam,
+        body: {
+          type: "object",
+          required: ["status"],
+          properties: {
+            status: {
+              type: "string",
+              enum: ["pending", "contacted", "closed", "active", "completed"],
+            },
+            note: { type: "string", maxLength: 500 },
+          },
+        },
+      },
+    },
+    updateServiceRequest
+  );
 
   fastify.get(
     "/audit-log",

@@ -1,0 +1,59 @@
+import { FastifyInstance } from "fastify";
+import { authHook } from "../middleware/auth";
+import { requireRole } from "../middleware/requireRole";
+import {
+  createInquiry,
+  createEventPromotion,
+  listMine,
+  getOne,
+} from "../controller/service";
+
+const idParam = {
+  type: "object",
+  required: ["id"],
+  properties: { id: { type: "string", format: "uuid" } },
+};
+
+const inquiryBody = {
+  type: "object",
+  required: ["type", "contactEmail"],
+  properties: {
+    type: {
+      type: "string",
+      enum: ["website", "appointment", "productivity", "consulting"],
+    },
+    contactName: { type: "string", maxLength: 200 },
+    contactEmail: { type: "string", format: "email" },
+    contactPhone: { type: "string", maxLength: 40 },
+    firmName: { type: "string", maxLength: 200 },
+    payload: { type: "object", additionalProperties: true },
+  },
+};
+
+export default async function serviceRoutes(fastify: FastifyInstance) {
+  fastify.addHook("onRequest", authHook);
+  fastify.addHook("preHandler", requireRole("LAWYER", "FIRM"));
+
+  fastify.post("/requests", { schema: { body: inquiryBody } }, createInquiry);
+
+  // Event promotion is multipart (flyer upload) — body validated in the controller/logic.
+  fastify.post("/event-promotion", createEventPromotion);
+
+  fastify.get(
+    "/me",
+    {
+      schema: {
+        querystring: {
+          type: "object",
+          properties: {
+            page: { type: "integer", default: 1 },
+            limit: { type: "integer", default: 20 },
+          },
+        },
+      },
+    },
+    listMine
+  );
+
+  fastify.get("/:id", { schema: { params: idParam } }, getOne);
+}

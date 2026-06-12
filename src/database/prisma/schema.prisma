@@ -57,6 +57,7 @@ model Account {
   firmsAsVerifyingPartner FirmProfile[]   @relation("VerifyingPartner")
   adminAuditLog     AdminAuditLog[]
   researchThreads   ResearchThread[]
+  serviceRequests   ServiceRequest[]
 
   @@index([role, status])
   @@index([role, status, locationCity])
@@ -324,14 +325,40 @@ model Event {
   endAt             DateTime? @map("end_at")
   registrationUrl   String?   @map("registration_url")
   status            String    @default("draft")
-  createdByAdminId  String    @map("created_by_admin_id") @db.Uuid
+  createdByAdminId  String?   @map("created_by_admin_id") @db.Uuid
   createdAt         DateTime  @default(now()) @map("created_at")
   updatedAt         DateTime  @updatedAt @map("updated_at")
 
-  createdByAdmin Account @relation(fields: [createdByAdminId], references: [id])
+  createdByAdmin Account?        @relation(fields: [createdByAdminId], references: [id])
+  serviceRequest ServiceRequest?
 
   @@index([status, startAt])
   @@map("events")
+}
+
+model ServiceRequest {
+  id            String    @id @default(uuid()) @db.Uuid
+  accountId     String    @map("account_id") @db.Uuid
+  type          String // website | appointment | productivity | consulting | event_promotion
+  status        String    @default("pending") // pending | contacted | closed | active | completed
+  contactName   String?   @map("contact_name")
+  contactEmail  String    @map("contact_email")
+  contactPhone  String?   @map("contact_phone")
+  firmName      String?   @map("firm_name")
+  payload       Json
+  amount        Int? // total in kobo (promotion only)
+  pricing       Json? // { days, dailyRateKobo, socialAddonKobo, totalKobo }
+  paymentStatus String    @default("not_required") @map("payment_status") // not_required | pending | paid
+  eventId       String?   @unique @map("event_id") @db.Uuid
+  createdAt     DateTime  @default(now()) @map("created_at")
+  updatedAt     DateTime  @updatedAt @map("updated_at")
+
+  account Account @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  event   Event?  @relation(fields: [eventId], references: [id])
+
+  @@index([accountId, createdAt(sort: Desc)])
+  @@index([type, status, createdAt(sort: Desc)])
+  @@map("service_requests")
 }
 
 model VerificationDocument {

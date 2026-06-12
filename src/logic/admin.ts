@@ -11,6 +11,11 @@ import {
 } from "../dao/admin";
 import { paginate, buildPagination } from "../helpers/pagination";
 import { dispatchNotification } from "../services/notification";
+import {
+  listServiceRequests,
+  findServiceRequestById,
+  updateServiceRequestStatus,
+} from "../dao/service";
 
 export const _listAccounts = async (
   filters: any,
@@ -164,4 +169,44 @@ export const _auditLog = async (
     message: "Audit log retrieved",
     data: { items, pagination: buildPagination(total, p, l) },
   });
+};
+
+export const _listServiceRequests = async (
+  filters: { type?: string; status?: string },
+  page: number,
+  limit: number
+): Promise<Response> => {
+  const { skip, take, page: p, limit: l } = paginate(page, limit);
+  const { items, total } = await listServiceRequests(filters, skip, take);
+  return response({
+    error: false,
+    message: "Service requests retrieved",
+    data: { items, pagination: buildPagination(total, p, l) },
+  });
+};
+
+export const _getServiceRequestAdmin = async (id: string): Promise<Response> => {
+  const sr = await findServiceRequestById(id);
+  if (!sr) throw notFound("Service request not found");
+  return response({ error: false, message: "Service request retrieved", data: sr });
+};
+
+export const _updateServiceRequestStatus = async (
+  adminId: string,
+  id: string,
+  status: string,
+  note?: string
+): Promise<Response> => {
+  const sr = await findServiceRequestById(id);
+  if (!sr) throw notFound("Service request not found");
+  const updated = await updateServiceRequestStatus(id, status);
+  await recordAuditLog({
+    adminAccountId: adminId,
+    action: "service_request.update",
+    targetType: "service_request",
+    targetId: id,
+    reason: note,
+    metadata: { status },
+  });
+  return response({ error: false, message: "Service request updated", data: updated });
 };

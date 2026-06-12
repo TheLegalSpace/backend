@@ -9,6 +9,9 @@ import {
   _deletePost,
   _deleteReview,
   _auditLog,
+  _listServiceRequests,
+  _getServiceRequestAdmin,
+  _updateServiceRequestStatus,
 } from "../logic/admin";
 import { responseOk, responseBad } from "../helpers/utility";
 
@@ -100,6 +103,37 @@ export const auditLog = async (req: FastifyRequest, reply: FastifyReply) => {
         page,
         limit
       )
+    );
+  } catch (e) {
+    return responseBad(reply, e);
+  }
+};
+
+export const listServiceRequests = async (req: FastifyRequest, reply: FastifyReply) => {
+  try {
+    const { type, status, page, limit } = req.query as any;
+    return responseOk(reply, await _listServiceRequests({ type, status }, page, limit));
+  } catch (e) {
+    return responseBad(reply, e);
+  }
+};
+
+export const getServiceRequest = async (req: FastifyRequest, reply: FastifyReply) => {
+  try {
+    const { id } = req.params as { id: string };
+    return responseOk(reply, await _getServiceRequestAdmin(id));
+  } catch (e) {
+    return responseBad(reply, e);
+  }
+};
+
+export const updateServiceRequest = async (req: FastifyRequest, reply: FastifyReply) => {
+  try {
+    const { id } = req.params as { id: string };
+    const { status, note } = req.body as { status: string; note?: string };
+    return responseOk(
+      reply,
+      await _updateServiceRequestStatus(req.account.id, id, status, note)
     );
   } catch (e) {
     return responseBad(reply, e);

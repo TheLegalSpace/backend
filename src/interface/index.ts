@@ -32,6 +32,7 @@ export type NotificationType =
   | "post_liked"
   | "article_published"
   | "verification_update"
+  | "service_request_received"
   | "system";
 
 export type IntakeBudget =
