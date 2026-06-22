@@ -13,6 +13,7 @@ import { startTopAccountsJob } from "./jobs/topAccounts";
 import { startDormantAccountJob } from "./jobs/dormantAccounts";
 import { startEventStatusJob } from "./jobs/eventStatus";
 import { startNotificationDigestJob } from "./jobs/notificationDigest";
+import { startSubscriptionSweepJob } from "./jobs/subscriptionSweep";
 
 import authRoutes from "./routes/auth";
 import profileRoutes from "./routes/profile";
@@ -32,6 +33,8 @@ import settingsRoutes from "./routes/settings";
 import adminRoutes from "./routes/admin";
 import researchRoutes from "./routes/research";
 import serviceRoutes from "./routes/service";
+import membershipRoutes from "./routes/membership";
+import webhookRoutes from "./routes/webhooks";
 
 const buildServer = async () => {
   const app = Fastify({
@@ -87,9 +90,13 @@ const buildServer = async () => {
       api.register(adminRoutes, { prefix: "/admin" });
       api.register(researchRoutes, { prefix: "/research" });
       api.register(serviceRoutes, { prefix: "/services" });
+      api.register(membershipRoutes, { prefix: "/membership" });
     },
     { prefix: env.apiPrefix }
   );
+
+  // Webhooks mount unprefixed (no API prefix, no auth) — verified by HMAC signature.
+  await app.register(webhookRoutes, { prefix: "/webhooks" });
 
   return app;
 };
@@ -105,6 +112,7 @@ const start = async () => {
   startDormantAccountJob();
   startEventStatusJob();
   startNotificationDigestJob();
+  startSubscriptionSweepJob();
   console.log("[app] cron jobs scheduled");
 
   const shutdown = async () => {

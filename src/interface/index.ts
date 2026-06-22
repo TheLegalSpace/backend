@@ -33,6 +33,12 @@ export type NotificationType =
   | "article_published"
   | "verification_update"
   | "service_request_received"
+  | "subscription_activated"
+  | "subscription_renewed"
+  | "subscription_expiring_soon"
+  | "subscription_expired"
+  | "payment_failed"
+  | "payment_method_updated"
   | "system";
 
 export type IntakeBudget =

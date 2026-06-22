@@ -64,6 +64,10 @@ export const runMatchmaking = async (
     where: {
       role: { in: ["LAWYER", "FIRM"] },
       status: "active",
+      // Only Professional members are surfaced in matchmaking — this is both the
+      // "Access to Client Leads" gate and "Priority Visibility" (community accounts
+      // are not shown at all, so professionals are always ranked above them).
+      membershipTier: "professional",
       OR: [
         { lawyerProfile: { verificationStatus: "verified" } },
         { firmProfile: { verificationStatus: "verified" } },

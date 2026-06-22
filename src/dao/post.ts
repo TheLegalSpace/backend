@@ -2,6 +2,7 @@ import { prisma } from "../config/database";
 
 export const createPost = async (data: {
   authorAccountId: string;
+  title?: string | null;
   body: string;
   pdfUrl?: string | null;
   pdfName?: string | null;

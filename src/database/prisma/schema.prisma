@@ -29,6 +29,8 @@ model Account {
   connectionCount Int       @default(0) @map("connection_count")
   followerCount   Int       @default(0) @map("follower_count")
   followingCount  Int       @default(0) @map("following_count")
+  membershipTier      String    @default("community") @map("membership_tier")
+  membershipExpiresAt DateTime? @map("membership_expires_at")
   lastActiveAt    DateTime  @default(now()) @map("last_active_at")
   createdAt       DateTime  @default(now()) @map("created_at")
   updatedAt       DateTime  @updatedAt @map("updated_at")
@@ -58,6 +60,10 @@ model Account {
   adminAuditLog     AdminAuditLog[]
   researchThreads   ResearchThread[]
   serviceRequests   ServiceRequest[]
+  subscription      Subscription?
+  payments          Payment[]
+  invoices          Invoice[]
+  paymentMethods    PaymentMethod[]
 
   @@index([role, status])
   @@index([role, status, locationCity])
@@ -156,6 +162,7 @@ model AccountPracticeArea {
 model Post {
   id              String    @id @default(uuid()) @db.Uuid
   authorAccountId String    @map("author_account_id") @db.Uuid
+  title           String?
   body            String
   pdfUrl          String?   @map("pdf_url")
   pdfName         String?   @map("pdf_name")
@@ -440,4 +447,108 @@ model ResearchMessage {
 
   @@index([threadId, createdAt])
   @@map("research_messages")
+}
+
+model Plan {
+  id               String   @id @default(uuid()) @db.Uuid
+  code             String   @unique // community | professional_lawyer | professional_firm
+  name             String
+  tier             String // community | professional
+  forRole          String?  @map("for_role") // LAWYER | FIRM | null (community applies to all)
+  priceKobo        Int      @default(0) @map("price_kobo")
+  intervalMonths   Int      @default(6) @map("interval_months")
+  paystackPlanCode String?  @map("paystack_plan_code") // populated after the Plan is created on Paystack
+  features         Json     @default("[]") // string[] for the comparison UI
+  isActive         Boolean  @default(true) @map("is_active")
+  createdAt        DateTime @default(now()) @map("created_at")
+  updatedAt        DateTime @updatedAt @map("updated_at")
+
+  subscriptions Subscription[]
+
+  @@map("plans")
+}
+
+model Subscription {
+  id                       String    @id @default(uuid()) @db.Uuid
+  accountId                String    @unique @map("account_id") @db.Uuid
+  planId                   String    @map("plan_id") @db.Uuid
+  status                   String    @default("active") // active | non_renewing | past_due | cancelled | expired
+  autoRenew                Boolean   @default(true) @map("auto_renew")
+  paystackCustomerCode     String?   @map("paystack_customer_code")
+  paystackSubscriptionCode String?   @map("paystack_subscription_code")
+  paystackEmailToken       String?   @map("paystack_email_token")
+  currentPeriodStart       DateTime? @map("current_period_start")
+  currentPeriodEnd         DateTime? @map("current_period_end")
+  createdAt                DateTime  @default(now()) @map("created_at")
+  updatedAt                DateTime  @updatedAt @map("updated_at")
+
+  account Account @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  plan    Plan    @relation(fields: [planId], references: [id])
+
+  @@index([status, currentPeriodEnd])
+  @@map("subscriptions")
+}
+
+model Payment {
+  id                String    @id @default(uuid()) @db.Uuid
+  accountId         String    @map("account_id") @db.Uuid
+  subscriptionId    String?   @map("subscription_id") @db.Uuid
+  paystackReference String    @unique @map("paystack_reference")
+  amountKobo        Int       @map("amount_kobo")
+  currency          String    @default("NGN")
+  status            String    @default("pending") // pending | success | failed
+  channel           String?
+  cardLast4         String?   @map("card_last4")
+  cardBrand         String?   @map("card_brand")
+  paidAt            DateTime? @map("paid_at")
+  gatewayResponse   Json?     @map("gateway_response")
+  createdAt         DateTime  @default(now()) @map("created_at")
+
+  account Account  @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  invoice Invoice?
+
+  @@index([accountId, createdAt(sort: Desc)])
+  @@map("payments")
+}
+
+model Invoice {
+  id             String    @id @default(uuid()) @db.Uuid
+  accountId      String    @map("account_id") @db.Uuid
+  subscriptionId String?   @map("subscription_id") @db.Uuid
+  paymentId      String?   @unique @map("payment_id") @db.Uuid
+  invoiceNumber  String    @unique @map("invoice_number")
+  planName       String    @map("plan_name")
+  amountKobo     Int       @map("amount_kobo")
+  status         String    @default("paid") // paid | pending | failed
+  issuedAt       DateTime  @default(now()) @map("issued_at")
+  periodStart    DateTime? @map("period_start")
+  periodEnd      DateTime? @map("period_end")
+  pdfUrl         String?   @map("pdf_url")
+  createdAt      DateTime  @default(now()) @map("created_at")
+
+  account Account  @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  payment Payment? @relation(fields: [paymentId], references: [id])
+
+  @@index([accountId, issuedAt(sort: Desc)])
+  @@map("invoices")
+}
+
+model PaymentMethod {
+  id                        String   @id @default(uuid()) @db.Uuid
+  accountId                 String   @map("account_id") @db.Uuid
+  paystackAuthorizationCode String   @map("paystack_authorization_code")
+  cardLast4                 String?  @map("card_last4")
+  cardBrand                 String?  @map("card_brand")
+  expMonth                  String?  @map("exp_month")
+  expYear                   String?  @map("exp_year")
+  bank                      String?
+  isDefault                 Boolean  @default(true) @map("is_default")
+  createdAt                 DateTime @default(now()) @map("created_at")
+  updatedAt                 DateTime @updatedAt @map("updated_at")
+
+  account Account @relation(fields: [accountId], references: [id], onDelete: Cascade)
+
+  @@unique([accountId, paystackAuthorizationCode])
+  @@index([accountId])
+  @@map("payment_methods")
 }

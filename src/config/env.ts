@@ -37,6 +37,12 @@ export const env = {
   emailFromName: process.env.EMAIL_FROM_NAME || "The Legal Space",
 
   geminiApiKey: process.env.GEMINI_API_KEY || "",
+
+  paystackSecretKey: process.env.PAYSTACK_SECRET_KEY || "",
+  paystackPublicKey: process.env.PAYSTACK_PUBLIC_KEY || "",
+  paystackBaseUrl: process.env.PAYSTACK_BASE_URL || "https://api.paystack.co",
+  // Frontend base URL Paystack redirects to after checkout (callback_url).
+  frontendUrl: process.env.FRONTEND_URL || "http://localhost:3000",
 };
 
 export const isProd = env.nodeEnv === "production";

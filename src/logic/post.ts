@@ -14,6 +14,16 @@ import { dispatchNotification } from "../services/notification";
 import { uploadToR2, MAX_ARTICLE_ASSET_BYTES } from "../services/storage";
 
 const PDF_MIME = "application/pdf";
+const TITLE_MAX = 200;
+
+const normalizeTitle = (title?: string | null): string | null => {
+  const trimmed = (title ?? "").trim();
+  if (!trimmed) return null;
+  if (trimmed.length > TITLE_MAX) {
+    throw badRequest(`Title exceeds ${TITLE_MAX} characters`);
+  }
+  return trimmed;
+};
 
 const notifyFollowersOfArticle = async (authorAccountId: string, postId: string) => {
   const followers = await prisma.follow.findMany({
@@ -31,11 +41,12 @@ const notifyFollowersOfArticle = async (authorAccountId: string, postId: string)
 
 export const _createCaptionPost = async (
   authorAccountId: string,
-  body: { body: string }
+  body: { body: string; title?: string | null }
 ): Promise<Response> => {
   if (!body.body || body.body.length === 0) throw badRequest("Body is required");
   if (body.body.length > 5000) throw badRequest("Body exceeds 5000 characters");
-  const post = await createPost({ authorAccountId, body: body.body });
+  const title = normalizeTitle(body.title);
+  const post = await createPost({ authorAccountId, title, body: body.body });
   return response({ error: false, message: "Post created", data: post });
 };
 

@@ -28,6 +28,10 @@ import { maskAccount } from "../services/anonymity";
 import { invalidateAccountCache } from "../middleware/auth";
 import { paginate, buildPagination } from "../helpers/pagination";
 import {
+  practiceAreaLimitForTier,
+  PROFESSIONAL_PRACTICE_AREA_LIMIT,
+} from "../config/membership";
+import {
   uploadToR2,
   MAX_AVATAR_BYTES,
   MAX_ARTICLE_ASSET_BYTES,
@@ -107,6 +111,18 @@ export const _toggleAnonymous = async (
   return response({ error: false, message: "Anonymity updated", data: account });
 };
 
+// "Set up to 3 Practice Areas" is a Professional perk; community accounts are capped lower.
+const assertPracticeAreaLimit = (tier: string, ids: string[]) => {
+  const limit = practiceAreaLimitForTier(tier);
+  if (new Set(ids).size > limit) {
+    throw badRequest(
+      limit < PROFESSIONAL_PRACTICE_AREA_LIMIT
+        ? `Your Community membership allows ${limit} practice area. Upgrade to Professional to set up to ${PROFESSIONAL_PRACTICE_AREA_LIMIT}.`
+        : `You can set up to ${PROFESSIONAL_PRACTICE_AREA_LIMIT} practice areas.`
+    );
+  }
+};
+
 export const _updatePracticeAreas = async (
   accountId: string,
   practiceAreaIds: string[]
@@ -116,6 +132,8 @@ export const _updatePracticeAreas = async (
     include: { practiceAreaLinks: true },
   });
   if (!account) throw notFound("Account not found");
+
+  assertPracticeAreaLimit(account.membershipTier, practiceAreaIds);
 
   const validAreas = await prisma.practiceArea.findMany({
     where: { id: { in: practiceAreaIds }, isActive: true },
@@ -399,6 +417,7 @@ export const _setupLawyer = async (
   if (account.role !== "PENDING_PROFESSIONAL") throw forbidden("Account is not awaiting professional setup");
   if (account.lawyerProfile) throw conflict("Lawyer profile already exists");
 
+  assertPracticeAreaLimit(account.membershipTier, body.practiceAreaIds);
   validateServices(body.services, body.practiceAreaIds);
 
   const validAreas = await prisma.practiceArea.findMany({
@@ -488,6 +507,7 @@ export const _setupFirm = async (
   if (account.role !== "PENDING_PROFESSIONAL") throw forbidden("Account is not awaiting professional setup");
   if (account.firmProfile) throw conflict("Firm profile already exists");
 
+  assertPracticeAreaLimit(account.membershipTier, body.practiceAreaIds);
   validateServices(body.services, body.practiceAreaIds);
 
   const validAreas = await prisma.practiceArea.findMany({

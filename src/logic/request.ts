@@ -43,6 +43,11 @@ export const _createRequest = async (
     lawyer.firmProfile?.verificationStatus ||
     "verified";
   if (verif !== "verified") throw badRequest("Lawyer is not verified");
+  // Client leads are a Professional-membership feature — community accounts cannot
+  // receive new requests (mirrors their exclusion from matchmaking).
+  if (lawyer.membershipTier !== "professional") {
+    throw badRequest("This lawyer is not currently accepting new clients");
+  }
 
   const existingPending = await prisma.request.findFirst({
     where: {

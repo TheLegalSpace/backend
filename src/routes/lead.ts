@@ -2,6 +2,7 @@ import { FastifyInstance } from "fastify";
 import { authHook } from "../middleware/auth";
 import { requireRole } from "../middleware/requireRole";
 import { requireVerified } from "../middleware/requireVerified";
+import { requireProfessional } from "../middleware/requireProfessional";
 import {
   listLeads,
   getLead,
@@ -35,7 +36,8 @@ export default async function leadRoutes(fastify: FastifyInstance) {
   fastify.get("/:id", { schema: { params: idParam } }, getLead);
   fastify.post(
     "/:id/accept",
-    { schema: { params: idParam }, preHandler: requireVerified },
+    // Accepting a client lead requires verification AND an active Professional membership.
+    { schema: { params: idParam }, preHandler: [requireVerified, requireProfessional] },
     acceptLead
   );
   fastify.post(
