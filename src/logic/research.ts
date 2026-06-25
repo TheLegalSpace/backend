@@ -131,7 +131,7 @@ export const _postMessage = async (
   return response({
     error: false,
     message: "Research response generated",
-    data: { ...assistantMessage, grounded: result.grounded },
+    data: { ...assistantMessage, grounded: result.grounded, widened: Boolean(result.widened) },
   });
 };
 

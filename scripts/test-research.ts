@@ -32,7 +32,7 @@ async function main() {
     return;
   }
 
-  // --- Step 2: grounded research query (the billing test) ---
+  // --- Step 2: grounded research query (the billing test + structure/recency) ---
   console.log("\n" + line);
   console.log("STEP 2 — grounded research query (THIS needs Google Search grounding)");
   console.log(line);
@@ -45,10 +45,16 @@ async function main() {
     console.log("✅ Grounded research SUCCEEDED — billing/grounding is working.");
     console.log("   grounded :", result.grounded);
     console.log("   confident:", result.confident);
+    console.log("   widened  :", Boolean(result.widened));
     console.log("   sources  :", result.sources.length);
     result.sources.slice(0, 5).forEach((s, i) => console.log(`     [${i + 1}] ${s.title} — ${s.url}`));
-    console.log("\n   answer (first 400 chars):\n");
-    console.log("   " + result.answer.slice(0, 400).replace(/\n/g, "\n   "));
+    // New behaviour checks: structure + recency labelling.
+    const years = [...result.answer.matchAll(/\b(19|20)\d{2}\b/g)].map((m) => m[0]);
+    console.log("   has 'Bottom line'   :", /bottom line/i.test(result.answer));
+    console.log("   has illustrative ex.:", /illustrative/i.test(result.answer));
+    console.log("   years cited         :", years.length ? [...new Set(years)].join(", ") : "(none)");
+    console.log("\n   answer (first 600 chars):\n");
+    console.log("   " + result.answer.slice(0, 600).replace(/\n/g, "\n   "));
   } catch (err: any) {
     console.log("❌ Grounded research FAILED.");
     console.log("   statusCode:", err?.statusCode ?? "(none)");
@@ -59,6 +65,26 @@ async function main() {
     console.log(
       "      grounding needs Cloud Billing enabled on the Gemini project."
     );
+  }
+
+  // --- Step 3: Commonwealth widening path ---
+  console.log("\n" + line);
+  console.log("STEP 3 — widening: a question thin on Nigerian authority should");
+  console.log("         fall back to English/Commonwealth persuasive authority");
+  console.log(line);
+  try {
+    const result = await runResearch({
+      history: [],
+      userText:
+        "What is the legal test for liability in the tort of negligent misstatement causing pure economic loss? Cite the leading authorities.",
+    });
+    console.log("   confident:", result.confident);
+    console.log("   widened  :", Boolean(result.widened), result.widened ? "✅ (used Commonwealth fallback)" : "(answered from Nigerian sources or refused)");
+    console.log("   sources  :", result.sources.length);
+    console.log("\n   answer (first 500 chars):\n");
+    console.log("   " + result.answer.slice(0, 500).replace(/\n/g, "\n   "));
+  } catch (err: any) {
+    console.log("❌ Step 3 FAILED:", err?.message || err);
   }
 }
 
