@@ -56,6 +56,8 @@ export const _createEventPromotion = async (
   }
   if (endAt < startAt) throw badRequest("endAt must be on or after startAt");
 
+  const address = input.address?.trim() || null;
+
   const { url: flyerUrl } = await uploadToR2({
     buffer: input.flyer.buffer,
     mimetype: input.flyer.mimetype,
@@ -70,6 +72,7 @@ export const _createEventPromotion = async (
     const event = await tx.event.create({
       data: {
         title: input.title,
+        location: address,
         coverUrl: flyerUrl,
         startAt,
         endAt,
@@ -92,6 +95,7 @@ export const _createEventPromotion = async (
         firmName: input.firmName ?? null,
         payload: {
           title: input.title,
+          address,
           startAt: input.startAt,
           endAt: input.endAt,
           shareOnSocial: input.shareOnSocial,

@@ -21,6 +21,7 @@ export const createArticle = async (req: FastifyRequest, reply: FastifyReply) =>
   try {
     const parts = (req as any).parts();
     let body = "";
+    let title = "";
     let pdfBuffer: Buffer | null = null;
     let pdfMimetype = "";
     let pdfFilename = "";
@@ -35,6 +36,8 @@ export const createArticle = async (req: FastifyRequest, reply: FastifyReply) =>
         }
       } else if (part.fieldname === "body") {
         body = String(part.value || "");
+      } else if (part.fieldname === "title") {
+        title = String(part.value || "");
       }
     }
     if (!pdfBuffer) {
@@ -44,6 +47,7 @@ export const createArticle = async (req: FastifyRequest, reply: FastifyReply) =>
       reply,
       await _createArticlePost(req.account.id, {
         body,
+        title,
         pdfBuffer,
         pdfMimetype,
         pdfFilename,

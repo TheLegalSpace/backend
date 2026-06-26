@@ -37,6 +37,7 @@ export interface CreateInquiryInput extends ContactInfo {
 
 export interface CreateEventPromotionInput extends ContactInfo {
   title: string;
+  address?: string;
   startAt: string;
   endAt: string;
   shareOnSocial: boolean;

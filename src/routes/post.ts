@@ -21,6 +21,7 @@ export default async function postRoutes(fastify: FastifyInstance) {
           type: "object",
           required: ["body"],
           properties: {
+            title: { type: "string", maxLength: 200 },
             body: { type: "string", minLength: 1, maxLength: 5000 },
           },
         },

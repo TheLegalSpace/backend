@@ -48,6 +48,7 @@ export const createEventPromotion = async (req: FastifyRequest, reply: FastifyRe
       reply,
       await _createEventPromotion(req.account.id, {
         title: fields.title,
+        address: fields.address,
         startAt: fields.startAt,
         endAt: fields.endAt,
         shareOnSocial: fields.shareOnSocial === "true",

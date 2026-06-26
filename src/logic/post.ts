@@ -52,10 +52,17 @@ export const _createCaptionPost = async (
 
 export const _createArticlePost = async (
   authorAccountId: string,
-  input: { body: string; pdfBuffer: Buffer; pdfMimetype: string; pdfFilename: string }
+  input: {
+    body: string;
+    title?: string | null;
+    pdfBuffer: Buffer;
+    pdfMimetype: string;
+    pdfFilename: string;
+  }
 ): Promise<Response> => {
   if (!input.body || input.body.length === 0) throw badRequest("Body is required");
   if (input.body.length > 5000) throw badRequest("Body exceeds 5000 characters");
+  const title = normalizeTitle(input.title);
   if (input.pdfMimetype !== PDF_MIME) throw badRequest("File must be a PDF");
   if (!input.pdfBuffer || input.pdfBuffer.byteLength === 0) {
     throw badRequest("PDF file is empty");
@@ -75,6 +82,7 @@ export const _createArticlePost = async (
 
   const post = await createPost({
     authorAccountId,
+    title,
     body: input.body,
     pdfUrl: url,
     pdfName: input.pdfFilename,
