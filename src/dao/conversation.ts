@@ -89,6 +89,22 @@ export const markMessageRead = async (messageId: string) => {
   return prisma.message.update({ where: { id: messageId }, data: { readAt: new Date() } });
 };
 
+export const markConversationRead = async (
+  conversationId: string,
+  accountId: string
+) => {
+  const readAt = new Date();
+  const { count } = await prisma.message.updateMany({
+    where: {
+      conversationId,
+      senderAccountId: { not: accountId },
+      readAt: null,
+    },
+    data: { readAt },
+  });
+  return { count, readAt };
+};
+
 export const closeConversation = async (id: string, closedByAccountId: string) => {
   return prisma.conversation.update({
     where: { id },

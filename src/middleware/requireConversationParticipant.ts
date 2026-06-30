@@ -21,5 +21,15 @@ export const requireConversationParticipant = async (
   if (conversation.userAccountId !== me && conversation.lawyerAccountId !== me) {
     return reply.status(403).send({ error: true, message: "Not a participant in this conversation" });
   }
+  // Archived = our safe-delete after 14 days of inactivity. To the user the chat
+  // is "deleted" — every conversation-scoped route returns 410 Gone (data is
+  // retained on our side for audit/disputes, but unreachable from the UI).
+  if (conversation.status === "archived") {
+    return reply.status(410).send({
+      error: true,
+      message:
+        "This conversation was deleted after 14 days of inactivity and is no longer available",
+    });
+  }
   (req as any).conversation = conversation;
 };

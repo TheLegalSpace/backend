@@ -7,6 +7,7 @@ import {
   listMessages,
   sendMessage,
   markRead,
+  markAllRead,
   close,
   archive,
 } from "../controller/conversation";
@@ -64,6 +65,14 @@ export default async function conversationRoutes(fastify: FastifyInstance) {
       preHandler: requireConversationParticipant,
     },
     sendMessage
+  );
+  fastify.patch(
+    "/:id/messages/read-all",
+    {
+      schema: { params: idParam },
+      preHandler: requireConversationParticipant,
+    },
+    markAllRead
   );
   fastify.patch(
     "/:id/messages/:messageId/read",

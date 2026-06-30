@@ -34,4 +34,5 @@ export const forbidden = (msg = "Forbidden") => new HttpError(msg, 403);
 export const unauthorized = (msg = "Unauthorized") => new HttpError(msg, 401);
 export const conflict = (msg = "Conflict") => new HttpError(msg, 409);
 export const badRequest = (msg = "Bad request") => new HttpError(msg, 400);
+export const gone = (msg = "Gone") => new HttpError(msg, 410);
 export const serviceUnavailable = (msg = "Service unavailable") => new HttpError(msg, 503);

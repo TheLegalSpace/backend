@@ -5,7 +5,15 @@ import {
   badRequest,
   notFound,
   forbidden,
+  gone,
 } from "../helpers/utility";
+
+// After 14 days of inactivity a conversation is archived. To the API it then
+// reads as "deleted" — archived is our safe-delete (data retained for audit /
+// disputes / NDPR, but no longer reachable from the UI). 410 lets the frontend
+// distinguish "deleted after inactivity" from a plain 404.
+const ARCHIVED_MESSAGE =
+  "This conversation was deleted after 14 days of inactivity and is no longer available";
 import { Response } from "../interface";
 import {
   listConversationsForAccount,
@@ -16,6 +24,7 @@ import {
   closeConversation,
   archiveConversation,
   unreadCountForAccount,
+  markConversationRead,
 } from "../dao/conversation";
 import { findPracticeAreasByIds } from "../dao/practiceArea";
 import { paginate, buildPagination } from "../helpers/pagination";
@@ -74,6 +83,7 @@ export const _getConversation = async (
 ): Promise<Response> => {
   const conv = await findConversationById(id);
   if (!conv) throw notFound("Conversation not found");
+  if (conv.status === "archived") throw gone(ARCHIVED_MESSAGE);
   const intake = conv.request?.intakePayload as any;
   const matterId = intake?.matter;
   const freeText = typeof intake?.freeText === "string" ? intake.freeText.trim() : "";
@@ -96,6 +106,9 @@ export const _listMessages = async (
   before?: string,
   limit = 50
 ): Promise<Response> => {
+  const conv = await findConversationById(conversationId);
+  if (!conv) throw notFound("Conversation not found");
+  if (conv.status === "archived") throw gone(ARCHIVED_MESSAGE);
   const safeLimit = Math.min(100, Math.max(1, limit));
   const items = await listMessages(conversationId, before, safeLimit);
   return response({
@@ -115,6 +128,7 @@ export const _sendMessage = async (
 ): Promise<Response> => {
   const conv = await findConversationById(conversationId);
   if (!conv) throw notFound("Conversation not found");
+  if (conv.status === "archived") throw gone(ARCHIVED_MESSAGE);
   if (conv.status !== "active") throw badRequest("Conversation is not active");
   if (!body.body || body.body.length === 0) throw badRequest("Body is required");
   if (body.body.length > 10000) throw badRequest("Body exceeds 10000 characters");
@@ -168,6 +182,35 @@ export const _markRead = async (
     readByAccountId: accountId,
   });
   return response({ error: false, message: "Marked read", data: m });
+};
+
+export const _markConversationRead = async (
+  conversationId: string,
+  accountId: string
+): Promise<Response> => {
+  const conv = await findConversationById(conversationId);
+  if (!conv) throw notFound("Conversation not found");
+  if (conv.status === "archived") throw gone(ARCHIVED_MESSAGE);
+  if (
+    conv.userAccountId !== accountId &&
+    conv.lawyerAccountId !== accountId
+  ) {
+    throw forbidden("Not a participant");
+  }
+  const { count, readAt } = await markConversationRead(conversationId, accountId);
+  if (count > 0) {
+    emitToConversation(conversationId, "message:read", {
+      conversationId,
+      bulk: true,
+      readAt,
+      readByAccountId: accountId,
+    });
+  }
+  return response({
+    error: false,
+    message: "Conversation marked read",
+    data: { conversationId, updated: count },
+  });
 };
 
 export const _closeConversation = async (

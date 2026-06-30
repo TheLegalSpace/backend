@@ -5,6 +5,7 @@ import {
   _listMessages,
   _sendMessage,
   _markRead,
+  _markConversationRead,
   _closeConversation,
   _archiveConversation,
 } from "../logic/conversation";
@@ -51,6 +52,15 @@ export const markRead = async (req: FastifyRequest, reply: FastifyReply) => {
   try {
     const { id, messageId } = req.params as { id: string; messageId: string };
     return responseOk(reply, await _markRead(id, messageId, req.account.id));
+  } catch (e) {
+    return responseBad(reply, e);
+  }
+};
+
+export const markAllRead = async (req: FastifyRequest, reply: FastifyReply) => {
+  try {
+    const { id } = req.params as { id: string };
+    return responseOk(reply, await _markConversationRead(id, req.account.id));
   } catch (e) {
     return responseBad(reply, e);
   }
