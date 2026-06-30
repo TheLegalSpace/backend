@@ -5,6 +5,40 @@ import { dispatchNotification } from "../services/notification";
 export const startStaleRequestJob = () => {
   cron.schedule("0 * * * *", async () => {
     const now = new Date();
+
+    // 1. Warn before expiry: pending requests due to expire within the next 24h
+    //    that haven't been warned yet. Nudges the user (and lawyer) to act.
+    const soon = new Date(now.getTime() + 24 * 60 * 60 * 1000);
+    const expiring = await prisma.request.findMany({
+      where: {
+        status: "pending",
+        expiryWarningSentAt: null,
+        expiresAt: { gt: now, lte: soon },
+      },
+      select: { id: true, userAccountId: true, lawyerAccountId: true, expiresAt: true },
+    });
+    if (expiring.length > 0) {
+      await prisma.request.updateMany({
+        where: { id: { in: expiring.map((r) => r.id) } },
+        data: { expiryWarningSentAt: now },
+      });
+      for (const r of expiring) {
+        // The user owns the request; the lawyer is nudged to respond before it lapses.
+        await dispatchNotification({
+          recipientAccountId: r.userAccountId,
+          type: "request_expiring",
+          payload: { requestId: r.id, expiresAt: r.expiresAt },
+        });
+        await dispatchNotification({
+          recipientAccountId: r.lawyerAccountId,
+          type: "request_expiring",
+          payload: { requestId: r.id, expiresAt: r.expiresAt },
+        });
+      }
+      console.log(`[cron] warned ${expiring.length} requests about to expire`);
+    }
+
+    // 2. Expire requests past their deadline.
     const stale = await prisma.request.findMany({
       where: { status: "pending", expiresAt: { lt: now } },
       select: { id: true, userAccountId: true },

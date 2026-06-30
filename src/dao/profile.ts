@@ -3,53 +3,19 @@ import type { Prisma } from "@prisma/client";
 
 type Tx = Prisma.TransactionClient;
 
-export const findServicesByAccount = async (accountId: string) => {
-  return prisma.serviceOffering.findMany({
-    where: { accountId },
-    orderBy: { createdAt: "asc" },
-  });
-};
-
-export const replaceServicesTx = async (
-  tx: Tx,
-  accountId: string,
-  services: { practiceAreaId: string; name: string; price: number }[]
-) => {
-  await tx.serviceOffering.deleteMany({ where: { accountId } });
-  if (services.length > 0) {
-    await tx.serviceOffering.createMany({
-      data: services.map((s) => ({
-        accountId,
-        practiceAreaId: s.practiceAreaId,
-        name: s.name,
-        price: s.price,
-      })),
-    });
-  }
-};
-
-export const deleteServicesForRemovedAreasTx = async (
-  tx: Tx,
-  accountId: string,
-  removedPracticeAreaIds: string[]
-) => {
-  if (removedPracticeAreaIds.length === 0) return;
-  await tx.serviceOffering.deleteMany({
-    where: { accountId, practiceAreaId: { in: removedPracticeAreaIds } },
-  });
-};
-
-export const applyFeeRangeFromServicesTx = async (
+// Roll the per-practice-area fee ranges up into the account-wide
+// feeRangeMin/feeRangeMax stored on the profile (coarse budget filter + summary badge).
+export const applyFeeRangeRollupTx = async (
   tx: Tx,
   accountId: string,
   role: string
 ) => {
-  const services = await tx.serviceOffering.findMany({
+  const areas = await tx.accountPracticeArea.findMany({
     where: { accountId },
-    select: { price: true },
+    select: { feeMin: true, feeMax: true },
   });
-  const feeRangeMin = services.length === 0 ? 0 : Math.min(...services.map((s) => s.price));
-  const feeRangeMax = services.length === 0 ? 0 : Math.max(...services.map((s) => s.price));
+  const feeRangeMin = areas.length === 0 ? 0 : Math.min(...areas.map((a) => a.feeMin));
+  const feeRangeMax = areas.length === 0 ? 0 : Math.max(...areas.map((a) => a.feeMax));
   if (role === "LAWYER") {
     await tx.lawyerProfile.update({
       where: { accountId },

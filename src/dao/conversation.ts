@@ -71,6 +71,11 @@ export const createMessage = async (data: {
       data: {
         lastMessageAt: new Date(),
         lastMessagePreview: data.body.slice(0, 80),
+        // A new message resets the inactivity clock and re-arms the reminder /
+        // expiry-warning crons for the next idle streak.
+        expiryWarningSentAt: null,
+        reminder1hSentForMessageId: null,
+        reminder3hSentForMessageId: null,
       },
     });
     return message;

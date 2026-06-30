@@ -18,8 +18,6 @@ import {
   setupLawyer,
   setupFirm,
   uploadVerificationDocument,
-  listServices,
-  updateServices,
 } from "../controller/profile";
 import {
   updateProfileSchema,
@@ -29,7 +27,6 @@ import {
   updateFirmSchema,
   lawyerSetupSchema,
   firmSetupSchema,
-  updateServicesSchema,
   verificationDocSchema,
   paginationQuery,
 } from "../dto/profile";
@@ -51,16 +48,6 @@ export default async function profileRoutes(fastify: FastifyInstance) {
     "/me/practice-areas",
     { schema: updatePracticeAreasSchema, preHandler: requireRole("LAWYER", "FIRM") },
     updatePracticeAreas
-  );
-  fastify.get(
-    "/me/services",
-    { preHandler: requireRole("LAWYER", "FIRM") },
-    listServices
-  );
-  fastify.put(
-    "/me/services",
-    { schema: updateServicesSchema, preHandler: requireRole("LAWYER", "FIRM") },
-    updateServices
   );
   fastify.patch(
     "/me/lawyer",

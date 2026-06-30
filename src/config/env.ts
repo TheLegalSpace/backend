@@ -38,6 +38,15 @@ export const env = {
 
   geminiApiKey: process.env.GEMINI_API_KEY || "",
 
+  // WhatsApp (Meta Cloud API). Disabled until a verified WhatsApp Business number
+  // + approved message templates exist — then flip WHATSAPP_ENABLED=true.
+  whatsappEnabled: process.env.WHATSAPP_ENABLED === "true",
+  whatsappApiBase: process.env.WHATSAPP_API_BASE || "https://graph.facebook.com/v21.0",
+  whatsappPhoneNumberId: process.env.WHATSAPP_PHONE_NUMBER_ID || "",
+  whatsappAccessToken: process.env.WHATSAPP_ACCESS_TOKEN || "",
+  // Name of the approved Meta template used for the unread-client-message reminder.
+  whatsappUnreadTemplate: process.env.WHATSAPP_UNREAD_TEMPLATE || "unread_client_message",
+
   paystackSecretKey: process.env.PAYSTACK_SECRET_KEY || "",
   paystackPublicKey: process.env.PAYSTACK_PUBLIC_KEY || "",
   paystackBaseUrl: process.env.PAYSTACK_BASE_URL || "https://api.paystack.co",

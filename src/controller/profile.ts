@@ -16,8 +16,6 @@ import {
   _setupLawyer,
   _setupFirm,
   _uploadVerificationDocument,
-  _listServices,
-  _updateServices,
 } from "../logic/profile";
 import { responseOk, responseCreated, responseBad } from "../helpers/utility";
 
@@ -57,8 +55,10 @@ export const toggleAnonymous = async (req: FastifyRequest, reply: FastifyReply) 
 
 export const updatePracticeAreas = async (req: FastifyRequest, reply: FastifyReply) => {
   try {
-    const { practiceAreaIds } = req.body as { practiceAreaIds: string[] };
-    return responseOk(reply, await _updatePracticeAreas(req.account.id, practiceAreaIds));
+    const { practiceAreas } = req.body as {
+      practiceAreas: { practiceAreaId: string; minFee: number; maxFee: number }[];
+    };
+    return responseOk(reply, await _updatePracticeAreas(req.account.id, practiceAreas));
   } catch (e) {
     return responseBad(reply, e);
   }
@@ -156,25 +156,6 @@ export const setupLawyer = async (req: FastifyRequest, reply: FastifyReply) => {
 export const setupFirm = async (req: FastifyRequest, reply: FastifyReply) => {
   try {
     return responseCreated(reply, await _setupFirm(req.account.id, req.body as any));
-  } catch (e) {
-    return responseBad(reply, e);
-  }
-};
-
-export const listServices = async (req: FastifyRequest, reply: FastifyReply) => {
-  try {
-    return responseOk(reply, await _listServices(req.account.id));
-  } catch (e) {
-    return responseBad(reply, e);
-  }
-};
-
-export const updateServices = async (req: FastifyRequest, reply: FastifyReply) => {
-  try {
-    const { services } = req.body as {
-      services: { practiceAreaId: string; name: string; price: number }[];
-    };
-    return responseOk(reply, await _updateServices(req.account.id, services));
   } catch (e) {
     return responseBad(reply, e);
   }

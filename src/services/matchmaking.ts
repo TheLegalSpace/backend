@@ -22,6 +22,17 @@ export interface ScoredMatch {
   matchedFactors: string[];
 }
 
+// The lawyer/firm sets a fee range per practice area. Compare the client's budget
+// against the *requested* area's minimum fee; fall back to the account-wide rollup
+// (feeRangeMin) when the account doesn't carry that area.
+const feeMinForMatter = (account: any, matter: string): number => {
+  const link = account.practiceAreaLinks?.find(
+    (l: any) => l.practiceAreaId === matter
+  );
+  if (link) return link.feeMin ?? 0;
+  return account.lawyerProfile?.feeRangeMin ?? account.firmProfile?.feeRangeMin ?? 0;
+};
+
 const computeMatchedFactors = (
   account: any,
   practiceAreaId: string,
@@ -36,8 +47,7 @@ const computeMatchedFactors = (
   if (accountAreaIds.includes(practiceAreaId)) factors.push("practice_area");
   if (account.locationCity === city) factors.push("location");
   else if (account.locationCountry === country) factors.push("country");
-  const feeMin =
-    account.lawyerProfile?.feeRangeMin ?? account.firmProfile?.feeRangeMin ?? 0;
+  const feeMin = feeMinForMatter(account, practiceAreaId);
   if (feeMin <= budgetMaxKobo) factors.push("fee_range");
   if (
     (preference === "lawyer" && account.role === "LAWYER") ||
@@ -89,8 +99,7 @@ export const runMatchmaking = async (
     let locationScore = 0;
     if (acc.locationCity === intake.location) locationScore = 20;
     else if (acc.locationCountry === countryFallback) locationScore = 10;
-    const feeMin =
-      acc.lawyerProfile?.feeRangeMin ?? acc.firmProfile?.feeRangeMin ?? 0;
+    const feeMin = feeMinForMatter(acc, intake.matter);
     const feeScore = feeMin <= budgetMaxKobo ? 15 : 0;
     let preferenceScore = 0;
     if (intake.preference === "lawyer" && acc.role === "LAWYER") preferenceScore = 10;
@@ -152,7 +161,7 @@ export const computeRelevanceScore = async (
   let locationScore = 0;
   if (acc.locationCity === intake.location) locationScore = 20;
   else if (acc.locationCountry === "Nigeria") locationScore = 10;
-  const feeMin = acc.lawyerProfile?.feeRangeMin ?? acc.firmProfile?.feeRangeMin ?? 0;
+  const feeMin = feeMinForMatter(acc, intake.matter);
   const feeScore = feeMin <= budgetMaxKobo ? 15 : 0;
   let preferenceScore = 0;
   if (intake.preference === "lawyer" && acc.role === "LAWYER") preferenceScore = 10;

@@ -39,7 +39,6 @@ model Account {
   lawyerProfile     LawyerProfile?
   firmProfile       FirmProfile?
   practiceAreaLinks AccountPracticeArea[]
-  serviceOfferings  ServiceOffering[]
   posts             Post[]
   postReactions     PostReaction[]
   followsAsFollower Follow[]              @relation("Follower")
@@ -124,31 +123,16 @@ model PracticeArea {
   createdAt DateTime @default(now()) @map("created_at")
 
   accountLinks     AccountPracticeArea[]
-  serviceOfferings ServiceOffering[]
 
   @@map("practice_areas")
-}
-
-model ServiceOffering {
-  id             String   @id @default(uuid()) @db.Uuid
-  accountId      String   @map("account_id") @db.Uuid
-  practiceAreaId String   @map("practice_area_id") @db.Uuid
-  name           String
-  price          Int
-  createdAt      DateTime @default(now()) @map("created_at")
-  updatedAt      DateTime @updatedAt @map("updated_at")
-
-  account      Account      @relation(fields: [accountId], references: [id], onDelete: Cascade)
-  practiceArea PracticeArea @relation(fields: [practiceAreaId], references: [id], onDelete: Cascade)
-
-  @@index([accountId, practiceAreaId])
-  @@map("service_offerings")
 }
 
 model AccountPracticeArea {
   id             String   @id @default(uuid()) @db.Uuid
   accountId      String   @map("account_id") @db.Uuid
   practiceAreaId String   @map("practice_area_id") @db.Uuid
+  feeMin         Int      @default(0) @map("fee_min")
+  feeMax         Int      @default(0) @map("fee_max")
   createdAt      DateTime @default(now()) @map("created_at")
 
   account      Account      @relation(fields: [accountId], references: [id], onDelete: Cascade)
@@ -219,6 +203,7 @@ model Request {
   createdAt       DateTime  @default(now()) @map("created_at")
   respondedAt     DateTime? @map("responded_at")
   expiresAt       DateTime  @map("expires_at")
+  expiryWarningSentAt DateTime? @map("expiry_warning_sent_at")
 
   userAccount   Account       @relation("UserRequests", fields: [userAccountId], references: [id], onDelete: Cascade)
   lawyerAccount Account       @relation("LawyerLeads", fields: [lawyerAccountId], references: [id], onDelete: Cascade)
@@ -240,6 +225,10 @@ model Conversation {
   lastMessagePreview  String?   @map("last_message_preview")
   closedAt            DateTime? @map("closed_at")
   closedByAccountId   String?   @map("closed_by_account_id") @db.Uuid
+  archivedAt              DateTime? @map("archived_at")
+  expiryWarningSentAt     DateTime? @map("expiry_warning_sent_at")
+  reminder1hSentForMessageId String? @map("reminder_1h_sent_for_message_id") @db.Uuid
+  reminder3hSentForMessageId String? @map("reminder_3h_sent_for_message_id") @db.Uuid
   createdAt           DateTime  @default(now()) @map("created_at")
 
   userAccount   Account  @relation("ConvUser", fields: [userAccountId], references: [id], onDelete: Cascade)

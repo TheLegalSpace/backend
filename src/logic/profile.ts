@@ -19,10 +19,7 @@ import {
   findConnectionsForAccount,
   countConnectionsForAccount,
   isFollowing,
-  replaceServicesTx,
-  deleteServicesForRemovedAreasTx,
-  applyFeeRangeFromServicesTx,
-  findServicesByAccount,
+  applyFeeRangeRollupTx,
 } from "../dao/profile";
 import { maskAccount } from "../services/anonymity";
 import { invalidateAccountCache } from "../middleware/auth";
@@ -43,7 +40,11 @@ const enrichProfile = async (account: any, viewerId?: string | null) => {
   if (viewerId && viewerId !== account.id) {
     following = await isFollowing(viewerId, account.id);
   }
-  const practiceAreas = (account.practiceAreaLinks || []).map((l: any) => l.practiceArea);
+  const practiceAreas = (account.practiceAreaLinks || []).map((l: any) => ({
+    ...l.practiceArea,
+    minFee: l.feeMin,
+    maxFee: l.feeMax,
+  }));
   return {
     ...masked,
     isFollowing: following,
@@ -125,7 +126,7 @@ const assertPracticeAreaLimit = (tier: string, ids: string[]) => {
 
 export const _updatePracticeAreas = async (
   accountId: string,
-  practiceAreaIds: string[]
+  practiceAreas: PracticeAreaFeeInput[]
 ): Promise<Response> => {
   const account = await prisma.account.findUnique({
     where: { id: accountId },
@@ -133,7 +134,9 @@ export const _updatePracticeAreas = async (
   });
   if (!account) throw notFound("Account not found");
 
+  const practiceAreaIds = practiceAreas.map((a) => a.practiceAreaId);
   assertPracticeAreaLimit(account.membershipTier, practiceAreaIds);
+  validatePracticeAreaFees(practiceAreas);
 
   const validAreas = await prisma.practiceArea.findMany({
     where: { id: { in: practiceAreaIds }, isActive: true },
@@ -143,21 +146,18 @@ export const _updatePracticeAreas = async (
     throw badRequest("One or more practice areas are invalid or inactive");
   }
 
-  const incoming = new Set(practiceAreaIds);
-  const removed = account.practiceAreaLinks
-    .map((l) => l.practiceAreaId)
-    .filter((id) => !incoming.has(id));
-
   await prisma.$transaction(async (tx) => {
     await tx.accountPracticeArea.deleteMany({ where: { accountId } });
     await tx.accountPracticeArea.createMany({
-      data: practiceAreaIds.map((practiceAreaId) => ({ accountId, practiceAreaId })),
+      data: practiceAreas.map((a) => ({
+        accountId,
+        practiceAreaId: a.practiceAreaId,
+        feeMin: a.minFee,
+        feeMax: a.maxFee,
+      })),
       skipDuplicates: true,
     });
-    await deleteServicesForRemovedAreasTx(tx, accountId, removed);
-    if (removed.length > 0) {
-      await applyFeeRangeFromServicesTx(tx, accountId, account.role);
-    }
+    await applyFeeRangeRollupTx(tx, accountId, account.role);
   });
 
   await invalidateAccountCache(account.authUserId);
@@ -166,57 +166,6 @@ export const _updatePracticeAreas = async (
     error: false,
     message: "Practice areas updated",
     data: updated,
-  });
-};
-
-interface ServiceInputBody {
-  practiceAreaId: string;
-  name: string;
-  price: number;
-}
-
-export const _listServices = async (accountId: string): Promise<Response> => {
-  const items = await findServicesByAccount(accountId);
-  return response({ error: false, message: "Services retrieved", data: items });
-};
-
-export const _updateServices = async (
-  accountId: string,
-  services: ServiceInputBody[]
-): Promise<Response> => {
-  const account = await prisma.account.findUnique({
-    where: { id: accountId },
-    include: { practiceAreaLinks: true },
-  });
-  if (!account) throw notFound("Account not found");
-  if (account.role !== "LAWYER" && account.role !== "FIRM") {
-    throw forbidden("Only LAWYER or FIRM accounts can manage services");
-  }
-
-  const accountAreaIds = new Set(account.practiceAreaLinks.map((l) => l.practiceAreaId));
-  for (const s of services) {
-    if (!accountAreaIds.has(s.practiceAreaId)) {
-      throw badRequest(
-        `Service "${s.name}" references a practice area not in your selected list`
-      );
-    }
-  }
-
-  const result = await prisma.$transaction(async (tx) => {
-    await replaceServicesTx(tx, accountId, services);
-    const range = await applyFeeRangeFromServicesTx(tx, accountId, account.role);
-    const items = await tx.serviceOffering.findMany({
-      where: { accountId },
-      orderBy: { createdAt: "asc" },
-    });
-    return { items, ...range };
-  });
-
-  await invalidateAccountCache(account.authUserId);
-  return response({
-    error: false,
-    message: "Services updated",
-    data: result,
   });
 };
 
@@ -369,30 +318,30 @@ export const _getProfilePosts = async (
   });
 };
 
-interface ServiceInput {
+interface PracticeAreaFeeInput {
   practiceAreaId: string;
-  name: string;
-  price: number;
+  minFee: number;
+  maxFee: number;
 }
 
-const validateServices = (services: ServiceInput[], practiceAreaIds: string[]) => {
-  const areaSet = new Set(practiceAreaIds);
-  for (const s of services) {
-    if (!areaSet.has(s.practiceAreaId)) {
-      throw badRequest(
-        `Service "${s.name}" references a practice area not in the selected list`
-      );
+const validatePracticeAreaFees = (areas: PracticeAreaFeeInput[]) => {
+  const seen = new Set<string>();
+  for (const a of areas) {
+    if (seen.has(a.practiceAreaId)) {
+      throw badRequest("Duplicate practice area in the list");
+    }
+    seen.add(a.practiceAreaId);
+    if (a.minFee > a.maxFee) {
+      throw badRequest("Minimum fee cannot be greater than maximum fee");
     }
   }
 };
 
-const aggregateFeeRange = (services: ServiceInput[]) => {
-  const prices = services.map((s) => s.price);
-  return {
-    feeRangeMin: Math.min(...prices),
-    feeRangeMax: Math.max(...prices),
-  };
-};
+// Account-wide rollup from the per-area ranges (coarse budget filter + summary badge).
+const rollupFeeRange = (areas: PracticeAreaFeeInput[]) => ({
+  feeRangeMin: Math.min(...areas.map((a) => a.minFee)),
+  feeRangeMax: Math.max(...areas.map((a) => a.maxFee)),
+});
 
 interface LawyerSetupInput {
   firstName: string;
@@ -401,8 +350,7 @@ interface LawyerSetupInput {
   callToBarYear: number;
   locationCity: string;
   locationCountry?: string;
-  practiceAreaIds: string[];
-  services: ServiceInput[];
+  practiceAreas: PracticeAreaFeeInput[];
 }
 
 export const _setupLawyer = async (
@@ -417,18 +365,19 @@ export const _setupLawyer = async (
   if (account.role !== "PENDING_PROFESSIONAL") throw forbidden("Account is not awaiting professional setup");
   if (account.lawyerProfile) throw conflict("Lawyer profile already exists");
 
-  assertPracticeAreaLimit(account.membershipTier, body.practiceAreaIds);
-  validateServices(body.services, body.practiceAreaIds);
+  const practiceAreaIds = body.practiceAreas.map((a) => a.practiceAreaId);
+  assertPracticeAreaLimit(account.membershipTier, practiceAreaIds);
+  validatePracticeAreaFees(body.practiceAreas);
 
   const validAreas = await prisma.practiceArea.findMany({
-    where: { id: { in: body.practiceAreaIds }, isActive: true },
+    where: { id: { in: practiceAreaIds }, isActive: true },
     select: { id: true },
   });
-  if (validAreas.length !== body.practiceAreaIds.length) {
+  if (validAreas.length !== new Set(practiceAreaIds).size) {
     throw badRequest("One or more practice areas are invalid or inactive");
   }
 
-  const { feeRangeMin, feeRangeMax } = aggregateFeeRange(body.services);
+  const { feeRangeMin, feeRangeMax } = rollupFeeRange(body.practiceAreas);
   const fullName = `${body.firstName.trim()} ${body.lastName.trim()}`.trim();
 
   const result = await prisma.$transaction(async (tx) => {
@@ -454,16 +403,13 @@ export const _setupLawyer = async (
       },
     });
     await tx.accountPracticeArea.createMany({
-      data: body.practiceAreaIds.map((practiceAreaId) => ({ accountId, practiceAreaId })),
-      skipDuplicates: true,
-    });
-    await tx.serviceOffering.createMany({
-      data: body.services.map((s) => ({
+      data: body.practiceAreas.map((a) => ({
         accountId,
-        practiceAreaId: s.practiceAreaId,
-        name: s.name,
-        price: s.price,
+        practiceAreaId: a.practiceAreaId,
+        feeMin: a.minFee,
+        feeMax: a.maxFee,
       })),
+      skipDuplicates: true,
     });
     return tx.account.findUnique({
       where: { id: accountId },
@@ -471,7 +417,6 @@ export const _setupLawyer = async (
         lawyerProfile: true,
         firmProfile: true,
         practiceAreaLinks: { include: { practiceArea: true } },
-        serviceOfferings: true,
       },
     });
   });
@@ -491,8 +436,7 @@ interface FirmSetupInput {
   firmEstablishmentYear: number;
   locationCity: string;
   locationCountry?: string;
-  practiceAreaIds: string[];
-  services: ServiceInput[];
+  practiceAreas: PracticeAreaFeeInput[];
 }
 
 export const _setupFirm = async (
@@ -507,18 +451,19 @@ export const _setupFirm = async (
   if (account.role !== "PENDING_PROFESSIONAL") throw forbidden("Account is not awaiting professional setup");
   if (account.firmProfile) throw conflict("Firm profile already exists");
 
-  assertPracticeAreaLimit(account.membershipTier, body.practiceAreaIds);
-  validateServices(body.services, body.practiceAreaIds);
+  const practiceAreaIds = body.practiceAreas.map((a) => a.practiceAreaId);
+  assertPracticeAreaLimit(account.membershipTier, practiceAreaIds);
+  validatePracticeAreaFees(body.practiceAreas);
 
   const validAreas = await prisma.practiceArea.findMany({
-    where: { id: { in: body.practiceAreaIds }, isActive: true },
+    where: { id: { in: practiceAreaIds }, isActive: true },
     select: { id: true },
   });
-  if (validAreas.length !== body.practiceAreaIds.length) {
+  if (validAreas.length !== new Set(practiceAreaIds).size) {
     throw badRequest("One or more practice areas are invalid or inactive");
   }
 
-  const { feeRangeMin, feeRangeMax } = aggregateFeeRange(body.services);
+  const { feeRangeMin, feeRangeMax } = rollupFeeRange(body.practiceAreas);
 
   const result = await prisma.$transaction(async (tx) => {
     await tx.account.update({
@@ -543,16 +488,13 @@ export const _setupFirm = async (
       },
     });
     await tx.accountPracticeArea.createMany({
-      data: body.practiceAreaIds.map((practiceAreaId) => ({ accountId, practiceAreaId })),
-      skipDuplicates: true,
-    });
-    await tx.serviceOffering.createMany({
-      data: body.services.map((s) => ({
+      data: body.practiceAreas.map((a) => ({
         accountId,
-        practiceAreaId: s.practiceAreaId,
-        name: s.name,
-        price: s.price,
+        practiceAreaId: a.practiceAreaId,
+        feeMin: a.minFee,
+        feeMax: a.maxFee,
       })),
+      skipDuplicates: true,
     });
     return tx.account.findUnique({
       where: { id: accountId },
@@ -560,7 +502,6 @@ export const _setupFirm = async (
         lawyerProfile: true,
         firmProfile: true,
         practiceAreaLinks: { include: { practiceArea: true } },
-        serviceOfferings: true,
       },
     });
   });

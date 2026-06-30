@@ -18,15 +18,26 @@ export const toggleAnonymousSchema = {
   },
 };
 
+// Each practice area carries its own fee range (min/max), in kobo.
+const practiceAreaFeeSchema = {
+  type: "object",
+  required: ["practiceAreaId", "minFee", "maxFee"],
+  properties: {
+    practiceAreaId: { type: "string", format: "uuid" },
+    minFee: { type: "integer", minimum: 0 },
+    maxFee: { type: "integer", minimum: 0 },
+  },
+};
+
 export const updatePracticeAreasSchema = {
   body: {
     type: "object",
-    required: ["practiceAreaIds"],
+    required: ["practiceAreas"],
     properties: {
-      practiceAreaIds: {
+      practiceAreas: {
         type: "array",
         minItems: 1,
-        items: { type: "string", format: "uuid" },
+        items: practiceAreaFeeSchema,
       },
     },
   },
@@ -55,16 +66,6 @@ export const updateFirmSchema = {
   },
 };
 
-const serviceItemSchema = {
-  type: "object",
-  required: ["practiceAreaId", "name", "price"],
-  properties: {
-    practiceAreaId: { type: "string", format: "uuid" },
-    name: { type: "string", minLength: 1, maxLength: 200 },
-    price: { type: "integer", minimum: 0 },
-  },
-};
-
 export const lawyerSetupSchema = {
   body: {
     type: "object",
@@ -74,8 +75,7 @@ export const lawyerSetupSchema = {
       "whatsappNumber",
       "callToBarYear",
       "locationCity",
-      "practiceAreaIds",
-      "services",
+      "practiceAreas",
     ],
     properties: {
       firstName: { type: "string", minLength: 1, maxLength: 80 },
@@ -84,15 +84,10 @@ export const lawyerSetupSchema = {
       callToBarYear: { type: "integer", minimum: 1900, maximum: 2100 },
       locationCity: { type: "string", minLength: 1, maxLength: 80 },
       locationCountry: { type: "string", maxLength: 80 },
-      practiceAreaIds: {
+      practiceAreas: {
         type: "array",
         minItems: 1,
-        items: { type: "string", format: "uuid" },
-      },
-      services: {
-        type: "array",
-        minItems: 1,
-        items: serviceItemSchema,
+        items: practiceAreaFeeSchema,
       },
     },
   },
@@ -107,8 +102,7 @@ export const firmSetupSchema = {
       "officeAddress",
       "firmEstablishmentYear",
       "locationCity",
-      "practiceAreaIds",
-      "services",
+      "practiceAreas",
     ],
     properties: {
       firmName: { type: "string", minLength: 1, maxLength: 200 },
@@ -117,29 +111,10 @@ export const firmSetupSchema = {
       firmEstablishmentYear: { type: "integer", minimum: 1800, maximum: 2100 },
       locationCity: { type: "string", minLength: 1, maxLength: 80 },
       locationCountry: { type: "string", maxLength: 80 },
-      practiceAreaIds: {
+      practiceAreas: {
         type: "array",
         minItems: 1,
-        items: { type: "string", format: "uuid" },
-      },
-      services: {
-        type: "array",
-        minItems: 1,
-        items: serviceItemSchema,
-      },
-    },
-  },
-};
-
-export const updateServicesSchema = {
-  body: {
-    type: "object",
-    required: ["services"],
-    properties: {
-      services: {
-        type: "array",
-        minItems: 1,
-        items: serviceItemSchema,
+        items: practiceAreaFeeSchema,
       },
     },
   },

@@ -3,12 +3,21 @@ import { redis } from "../config/redis";
 import { createNotification } from "../dao/notification";
 import { emitToAccount } from "../realtime/emitter";
 import { NotificationType } from "../interface";
+import { sendWhatsAppTemplate } from "./whatsapp";
+
+// Delivery transports. "in_app" is always sent (it backs the bell badge and is
+// the source of truth). Extra channels are best-effort side transports.
+export type NotificationChannel = "in_app" | "whatsapp";
 
 export interface DispatchNotificationInput {
   recipientAccountId: string;
   type: NotificationType;
   payload: Record<string, any>;
   emailable?: boolean;
+  // Extra transports beyond in-app. Defaults to in-app only.
+  channels?: NotificationChannel[];
+  // Required when channels includes "whatsapp": the approved Meta template + body params.
+  whatsapp?: { template: string; params?: string[] };
 }
 
 export const dispatchNotification = async (data: DispatchNotificationInput) => {
@@ -34,6 +43,29 @@ export const dispatchNotification = async (data: DispatchNotificationInput) => {
       meta: err?.meta,
       stack: err?.stack,
     });
+  }
+
+  // Best-effort WhatsApp side channel — must never break the in-app notification.
+  if (data.channels?.includes("whatsapp") && data.whatsapp) {
+    try {
+      const account = await prisma.account.findUnique({
+        where: { id: data.recipientAccountId },
+        select: { phone: true },
+      });
+      if (account?.phone) {
+        await sendWhatsAppTemplate({
+          to: account.phone,
+          template: data.whatsapp.template,
+          params: data.whatsapp.params,
+        });
+      } else {
+        console.warn(
+          `[notification] whatsapp requested but recipient ${data.recipientAccountId} has no phone`
+        );
+      }
+    } catch (err: any) {
+      console.error("[notification] whatsapp channel failed:", err?.message);
+    }
   }
 };
 
