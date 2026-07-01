@@ -141,7 +141,12 @@ export const totalUnreadMessagesForAccount = async (accountId: string) => {
     where: {
       senderAccountId: { not: accountId },
       readAt: null,
+      // Only count conversations the user can actually see in the sidebar.
+      // Archived conversations are hidden from the list (see
+      // listConversationsForAccount) — their unread messages must not leak
+      // into the badge, or you get "badge = 1" with "No conversations yet".
       conversation: {
+        status: { not: "archived" },
         OR: [{ userAccountId: accountId }, { lawyerAccountId: accountId }],
       },
     },
