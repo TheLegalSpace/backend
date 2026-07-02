@@ -5,7 +5,7 @@
   "main": "dist/app.js",
   "scripts": {
     "dev": "tsx watch src/app.ts",
-    "build": "prisma generate --schema=src/database/prisma/schema.prisma && tsc",
+    "build": "prisma generate --schema=src/database/prisma/schema.prisma && tsc && node -e \"require('fs').cpSync('src/assets','dist/assets',{recursive:true})\"",
     "start": "node dist/app.js",
     "migrate": "prisma migrate dev --schema=src/database/prisma/schema.prisma",
     "generate": "prisma generate --schema=src/database/prisma/schema.prisma",
