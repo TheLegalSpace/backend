@@ -15,6 +15,7 @@ import {
   getProfileArticles,
   getProfileReviews,
   getProfilePosts,
+  setProfessionalRole,
   setupLawyer,
   setupFirm,
   uploadVerificationDocument,
@@ -25,6 +26,7 @@ import {
   updatePracticeAreasSchema,
   updateLawyerSchema,
   updateFirmSchema,
+  professionalRoleSchema,
   lawyerSetupSchema,
   firmSetupSchema,
   verificationDocSchema,
@@ -59,14 +61,22 @@ export default async function profileRoutes(fastify: FastifyInstance) {
     { schema: updateFirmSchema, preHandler: requireRole("FIRM") },
     updateFirm
   );
+  fastify.patch(
+    "/me/professional-role",
+    {
+      schema: professionalRoleSchema,
+      preHandler: requireRole("PENDING_PROFESSIONAL", "LAWYER", "FIRM"),
+    },
+    setProfessionalRole
+  );
   fastify.post(
     "/me/lawyer/setup",
-    { schema: lawyerSetupSchema, preHandler: requireRole("PENDING_PROFESSIONAL") },
+    { schema: lawyerSetupSchema, preHandler: requireRole("PENDING_PROFESSIONAL", "LAWYER") },
     setupLawyer
   );
   fastify.post(
     "/me/firm/setup",
-    { schema: firmSetupSchema, preHandler: requireRole("PENDING_PROFESSIONAL") },
+    { schema: firmSetupSchema, preHandler: requireRole("PENDING_PROFESSIONAL", "FIRM") },
     setupFirm
   );
   fastify.post(

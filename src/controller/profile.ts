@@ -13,6 +13,7 @@ import {
   _getProfileArticles,
   _getProfileReviews,
   _getProfilePosts,
+  _setProfessionalRole,
   _setupLawyer,
   _setupFirm,
   _uploadVerificationDocument,
@@ -140,6 +141,15 @@ export const getProfilePosts = async (req: FastifyRequest, reply: FastifyReply) 
     const { accountId } = req.params as { accountId: string };
     const { page, limit } = req.query as any;
     return responseOk(reply, await _getProfilePosts(accountId, req.account.id, page, limit));
+  } catch (e) {
+    return responseBad(reply, e);
+  }
+};
+
+export const setProfessionalRole = async (req: FastifyRequest, reply: FastifyReply) => {
+  try {
+    const { role } = req.body as { role: "LAWYER" | "FIRM" };
+    return responseOk(reply, await _setProfessionalRole(req.account.id, role));
   } catch (e) {
     return responseBad(reply, e);
   }

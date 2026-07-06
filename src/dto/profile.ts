@@ -66,6 +66,16 @@ export const updateFirmSchema = {
   },
 };
 
+export const professionalRoleSchema = {
+  body: {
+    type: "object",
+    required: ["role"],
+    properties: {
+      role: { type: "string", enum: ["LAWYER", "FIRM"] },
+    },
+  },
+};
+
 export const lawyerSetupSchema = {
   body: {
     type: "object",

@@ -2,6 +2,7 @@ import { FastifyInstance } from "fastify";
 import { authHook } from "../middleware/auth";
 import { requireRole } from "../middleware/requireRole";
 import { requireOwner } from "../middleware/requireOwner";
+import { requireCompletedProfile } from "../middleware/requireCompletedProfile";
 import { create, createArticle, getById, remove, react, unreact } from "../controller/post";
 
 const idParam = {
@@ -26,13 +27,13 @@ export default async function postRoutes(fastify: FastifyInstance) {
           },
         },
       },
-      preHandler: requireRole("LAWYER", "FIRM"),
+      preHandler: [requireRole("LAWYER", "FIRM"), requireCompletedProfile],
     },
     create
   );
   fastify.post(
     "/article",
-    { preHandler: requireRole("LAWYER", "FIRM") },
+    { preHandler: [requireRole("LAWYER", "FIRM"), requireCompletedProfile] },
     createArticle
   );
   fastify.get("/:id", { schema: { params: idParam } }, getById);

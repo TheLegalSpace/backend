@@ -7,7 +7,7 @@ import { env } from "../config/env";
 import { dispatchNotification } from "../services/notification";
 import { generateInvoicePdf } from "../services/invoice";
 import { invalidateAccountCache } from "../middleware/auth";
-import { findAccountById, findAccountByEmail } from "../dao/account";
+import { findAccountById, findAccountByEmail, updateAccount } from "../dao/account";
 import {
   getPlanByCode,
   getPlanById,
@@ -104,6 +104,24 @@ const activateFromCharge = async (
   if (!charge.reference) return;
   const existing = await findPaymentByReference(charge.reference);
   if (existing) return; // already processed
+
+  // Plans are priced per account type, and the account type can change during
+  // onboarding after a checkout was initialized. If this charge is for a plan
+  // that no longer matches the account's role: realign the role while no profile
+  // exists yet (the payment is the strongest signal of intent), or refuse once
+  // setup has completed for the other type — otherwise a firm could pay the
+  // cheaper lawyer price through a stale checkout.
+  if (plan.forRole && account.role !== plan.forRole) {
+    const fresh = await findAccountById(account.id);
+    if (fresh?.lawyerProfile || fresh?.firmProfile) {
+      throw badRequest(
+        "This payment was made for a different account type. Please contact support to resolve it."
+      );
+    }
+    await updateAccount(account.id, { role: plan.forRole });
+    account = { ...account, role: plan.forRole };
+    await invalidateAccountCache(account.authUserId);
+  }
 
   const isRenewal = account.membershipTier === "professional";
   const now = new Date();

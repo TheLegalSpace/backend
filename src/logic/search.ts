@@ -26,6 +26,9 @@ export const _search = async (
     const where = {
       role: "LAWYER",
       status: "active",
+      // Exclude accounts that picked the lawyer type during onboarding but never
+      // completed profile setup — they'd surface with placeholder names.
+      lawyerProfile: { isNot: null },
       OR: [
         { fullName: { contains: q, mode: "insensitive" as const } },
         { bio: { contains: q, mode: "insensitive" as const } },
@@ -49,6 +52,7 @@ export const _search = async (
     const where = {
       role: "FIRM",
       status: "active",
+      firmProfile: { isNot: null },
       OR: [
         { fullName: { contains: q, mode: "insensitive" as const } },
         { bio: { contains: q, mode: "insensitive" as const } },

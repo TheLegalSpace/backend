@@ -353,6 +353,50 @@ interface LawyerSetupInput {
   practiceAreas: PracticeAreaFeeInput[];
 }
 
+// Sets the professional account type (LAWYER or FIRM) during onboarding, before
+// profile setup. Called when the user picks "Lawyer" or "Firm" on the plan flow so
+// the membership module can derive the right plan/price from `account.role`.
+// Re-callable (they can change their mind) until either setup completes or a
+// professional plan has been paid for — the plan is priced per role.
+export const _setProfessionalRole = async (
+  accountId: string,
+  role: "LAWYER" | "FIRM"
+): Promise<Response> => {
+  const account = await findAccountById(accountId);
+  if (!account) throw notFound("Account not found");
+
+  if (!["PENDING_PROFESSIONAL", "LAWYER", "FIRM"].includes(account.role)) {
+    throw forbidden("Only professional accounts can set an account type");
+  }
+  if (account.lawyerProfile || account.firmProfile) {
+    throw conflict("Profile setup is already complete — account type can no longer be changed");
+  }
+
+  if (account.role === role) {
+    return response({ error: false, message: "Account type set", data: account });
+  }
+
+  if (account.membershipTier === "professional") {
+    const current = account.role === "LAWYER" ? "lawyer" : "firm";
+    throw forbidden(
+      `Your professional membership was purchased for a ${current} account. Contact support to change your account type.`
+    );
+  }
+
+  const updated = await prisma.account.update({
+    where: { id: accountId },
+    data: { role },
+    include: {
+      lawyerProfile: true,
+      firmProfile: true,
+      practiceAreaLinks: { include: { practiceArea: true } },
+    },
+  });
+
+  await invalidateAccountCache(account.authUserId);
+  return response({ error: false, message: "Account type set", data: updated });
+};
+
 export const _setupLawyer = async (
   accountId: string,
   body: LawyerSetupInput
@@ -362,7 +406,12 @@ export const _setupLawyer = async (
     include: { lawyerProfile: true },
   });
   if (!account) throw notFound("Account not found");
-  if (account.role !== "PENDING_PROFESSIONAL") throw forbidden("Account is not awaiting professional setup");
+  if (account.role === "FIRM") {
+    throw forbidden("Account type is set to firm — switch your account type before lawyer setup");
+  }
+  if (account.role !== "PENDING_PROFESSIONAL" && account.role !== "LAWYER") {
+    throw forbidden("Account is not awaiting professional setup");
+  }
   if (account.lawyerProfile) throw conflict("Lawyer profile already exists");
 
   const practiceAreaIds = body.practiceAreas.map((a) => a.practiceAreaId);
@@ -448,7 +497,12 @@ export const _setupFirm = async (
     include: { firmProfile: true },
   });
   if (!account) throw notFound("Account not found");
-  if (account.role !== "PENDING_PROFESSIONAL") throw forbidden("Account is not awaiting professional setup");
+  if (account.role === "LAWYER") {
+    throw forbidden("Account type is set to lawyer — switch your account type before firm setup");
+  }
+  if (account.role !== "PENDING_PROFESSIONAL" && account.role !== "FIRM") {
+    throw forbidden("Account is not awaiting professional setup");
+  }
   if (account.firmProfile) throw conflict("Firm profile already exists");
 
   const practiceAreaIds = body.practiceAreas.map((a) => a.practiceAreaId);
