@@ -221,7 +221,11 @@ export const _getPlans = async (account: any): Promise<Response> => {
   });
 };
 
-export const _subscribe = async (account: any): Promise<Response> => {
+// `context` tags where the checkout was started ("onboarding" during registration,
+// anything else/absent = dashboard). It is round-tripped onto the Paystack callback
+// redirect as ?context=... so the frontend callback page knows where to send the
+// user afterwards — back into the onboarding wizard or back to the dashboard.
+export const _subscribe = async (account: any, context?: string): Promise<Response> => {
   if (account.membershipTier === "professional") {
     const sub = await getSubscriptionByAccount(account.id);
     if (sub && (sub.status === "active" || sub.status === "non_renewing")) {
@@ -237,12 +241,17 @@ export const _subscribe = async (account: any): Promise<Response> => {
     throw serviceUnavailable("This plan is not yet configured on Paystack. Contact support.");
   }
 
+  const callbackUrl =
+    context === "onboarding"
+      ? `${env.frontendUrl}/membership/callback?context=onboarding`
+      : `${env.frontendUrl}/membership/callback`;
+
   const init = await paystack.initializeTransaction({
     email: account.email,
     amountKobo: plan.priceKobo,
     planCode: plan.paystackPlanCode,
-    callbackUrl: `${env.frontendUrl}/membership/callback`,
-    metadata: { accountId: account.id, planId: plan.id },
+    callbackUrl,
+    metadata: { accountId: account.id, planId: plan.id, context: context ?? "dashboard" },
   });
 
   return response({
