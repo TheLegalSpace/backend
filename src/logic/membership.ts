@@ -243,8 +243,8 @@ export const _subscribe = async (account: any, context?: string): Promise<Respon
 
   const callbackUrl =
     context === "onboarding"
-      ? `${env.frontendUrl}/membership/callback?context=onboarding`
-      : `${env.frontendUrl}/membership/callback`;
+      ? `${env.frontendUrl}membership/callback?context=onboarding`
+      : `${env.frontendUrl}membership/callback`;
 
   const init = await paystack.initializeTransaction({
     email: account.email,
