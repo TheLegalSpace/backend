@@ -51,7 +51,15 @@ export const env = {
   paystackPublicKey: process.env.PAYSTACK_PUBLIC_KEY || "",
   paystackBaseUrl: process.env.PAYSTACK_BASE_URL || "https://api.paystack.co",
   // Frontend base URL Paystack redirects to after checkout (callback_url).
+  // Used as the default when the client doesn't send its own callbackUrl.
   frontendUrl: process.env.FRONTEND_URL || "http://localhost:3000",
+  // Extra origins allowed as client-supplied payment callback targets, beyond
+  // FRONTEND_URL's origin and localhost (comma-separated), e.g. a Netlify
+  // preview domain. Guards against open redirects off the back of a real payment.
+  frontendAllowedOrigins: (process.env.FRONTEND_ALLOWED_ORIGINS || "")
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean),
 };
 
 export const isProd = env.nodeEnv === "production";

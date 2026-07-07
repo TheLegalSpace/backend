@@ -221,11 +221,38 @@ export const _getPlans = async (account: any): Promise<Response> => {
   });
 };
 
+// Resolves the Paystack redirect target. The client may send its own callbackUrl
+// (so localhost / preview deploys redirect back to themselves instead of the
+// FRONTEND_URL deployment), but only to an allowed origin — a client-controlled
+// redirect at the end of a real payment is an open-redirect/phishing vector
+// otherwise. Localhost is always allowed for dev.
+const resolveCallbackUrl = (raw?: string): URL => {
+  // Base form resolves cleanly whether FRONTEND_URL has a trailing slash or not.
+  if (!raw) return new URL("/membership/callback", env.frontendUrl);
+  let url: URL;
+  try {
+    url = new URL(raw);
+  } catch {
+    throw badRequest("callbackUrl must be an absolute URL");
+  }
+  const isLocalhost = url.hostname === "localhost" || url.hostname === "127.0.0.1";
+  const allowed =
+    isLocalhost ||
+    url.origin === new URL(env.frontendUrl).origin ||
+    env.frontendAllowedOrigins.includes(url.origin);
+  if (!allowed) throw badRequest("callbackUrl origin is not allowed");
+  return url;
+};
+
 // `context` tags where the checkout was started ("onboarding" during registration,
 // anything else/absent = dashboard). It is round-tripped onto the Paystack callback
 // redirect as ?context=... so the frontend callback page knows where to send the
 // user afterwards — back into the onboarding wizard or back to the dashboard.
-export const _subscribe = async (account: any, context?: string): Promise<Response> => {
+export const _subscribe = async (
+  account: any,
+  context?: string,
+  callbackUrl?: string
+): Promise<Response> => {
   if (account.membershipTier === "professional") {
     const sub = await getSubscriptionByAccount(account.id);
     if (sub && (sub.status === "active" || sub.status === "non_renewing")) {
@@ -241,16 +268,14 @@ export const _subscribe = async (account: any, context?: string): Promise<Respon
     throw serviceUnavailable("This plan is not yet configured on Paystack. Contact support.");
   }
 
-  const callbackUrl =
-    context === "onboarding"
-      ? `${env.frontendUrl}membership/callback?context=onboarding`
-      : `${env.frontendUrl}membership/callback`;
+  const redirect = resolveCallbackUrl(callbackUrl);
+  if (context === "onboarding") redirect.searchParams.set("context", "onboarding");
 
   const init = await paystack.initializeTransaction({
     email: account.email,
     amountKobo: plan.priceKobo,
     planCode: plan.paystackPlanCode,
-    callbackUrl,
+    callbackUrl: redirect.toString(),
     metadata: { accountId: account.id, planId: plan.id, context: context ?? "dashboard" },
   });
 

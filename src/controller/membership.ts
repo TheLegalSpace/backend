@@ -30,8 +30,8 @@ export const getPlans = async (req: FastifyRequest, reply: FastifyReply) => {
 
 export const subscribe = async (req: FastifyRequest, reply: FastifyReply) => {
   try {
-    const context = (req.body as any)?.context as string | undefined;
-    return responseOk(reply, await _subscribe(req.account, context));
+    const { context, callbackUrl } = (req.body as any) ?? {};
+    return responseOk(reply, await _subscribe(req.account, context, callbackUrl));
   } catch (e) {
     return responseBad(reply, e);
   }
