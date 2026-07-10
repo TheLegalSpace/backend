@@ -79,6 +79,22 @@ async function main() {
     }
   }
   console.log(`[seed] inserted/updated ${PLAN_SEEDS.length} membership plans`);
+
+  // Legal News Survey — the single active survey behind the admin "Legal News Survey" page.
+  await prisma.survey.upsert({
+    where: { slug: "legal-news" },
+    update: {
+      question: "Would you use a dedicated legal news feature on The Legal Space?",
+      isActive: true,
+    },
+    create: {
+      slug: "legal-news",
+      question: "Would you use a dedicated legal news feature on The Legal Space?",
+      options: ["yes", "no", "maybe"],
+      isActive: true,
+    },
+  });
+  console.log("[seed] inserted/updated legal-news survey");
 }
 
 main()

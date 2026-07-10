@@ -63,6 +63,9 @@ model Account {
   payments          Payment[]
   invoices          Invoice[]
   paymentMethods    PaymentMethod[]
+  supportTickets    SupportTicket[]
+  surveyResponses   SurveyResponse[]
+  announcements     Announcement[]
 
   @@index([role, status])
   @@index([role, status, locationCity])
@@ -321,6 +324,7 @@ model Event {
   endAt             DateTime? @map("end_at")
   registrationUrl   String?   @map("registration_url")
   status            String    @default("draft")
+  clickCount        Int       @default(0) @map("click_count")
   createdByAdminId  String?   @map("created_by_admin_id") @db.Uuid
   createdAt         DateTime  @default(now()) @map("created_at")
   updatedAt         DateTime  @updatedAt @map("updated_at")
@@ -375,6 +379,49 @@ model VerificationDocument {
   @@index([accountId, docType])
   @@index([status])
   @@map("verification_documents")
+}
+
+model Announcement {
+  id               String    @id @default(uuid()) @db.Uuid
+  title            String
+  body             String
+  audience         String    @default("all") // all | lawyers | firms | clients
+  status           String    @default("draft") // draft | scheduled | sent
+  scheduledAt      DateTime? @map("scheduled_at")
+  sentAt           DateTime? @map("sent_at")
+  recipientCount   Int       @default(0) @map("recipient_count")
+  createdByAdminId String    @map("created_by_admin_id") @db.Uuid
+  createdAt        DateTime  @default(now()) @map("created_at")
+  updatedAt        DateTime  @updatedAt @map("updated_at")
+
+  createdByAdmin Account @relation(fields: [createdByAdminId], references: [id])
+
+  @@index([status, createdAt(sort: Desc)])
+  @@map("announcements")
+}
+
+model SearchLog {
+  id         String   @id @default(uuid()) @db.Uuid
+  accountId  String?  @map("account_id") @db.Uuid
+  query      String
+  kind       String // search | matchmaking | matchmaking_text
+  resultCount Int?    @map("result_count")
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  @@index([createdAt(sort: Desc)])
+  @@index([kind, createdAt(sort: Desc)])
+  @@map("search_logs")
+}
+
+model DailyStats {
+  id        String   @id @default(uuid()) @db.Uuid
+  date      DateTime @unique @db.Date
+  dau       Int      @default(0)
+  mau       Int      @default(0)
+  newUsers  Int      @default(0) @map("new_users")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@map("daily_stats")
 }
 
 model AdminAuditLog {
@@ -520,6 +567,56 @@ model Invoice {
 
   @@index([accountId, issuedAt(sort: Desc)])
   @@map("invoices")
+}
+
+model SupportTicket {
+  id           String   @id @default(uuid()) @db.Uuid
+  ticketNumber Int      @unique @default(autoincrement()) @map("ticket_number")
+  accountId    String   @map("account_id") @db.Uuid
+  name         String
+  email        String
+  category     String // billing | technical | account | general
+  subject      String
+  body         String
+  status       String   @default("open") // open | in_progress | closed
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  account Account @relation(fields: [accountId], references: [id], onDelete: Cascade)
+
+  @@index([status, createdAt(sort: Desc)])
+  @@index([accountId, createdAt(sort: Desc)])
+  @@map("support_tickets")
+}
+
+model Survey {
+  id        String   @id @default(uuid()) @db.Uuid
+  slug      String   @unique
+  question  String
+  options   Json     @default("[\"yes\",\"no\",\"maybe\"]") // allowed answer values
+  isActive  Boolean  @default(true) @map("is_active")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  responses SurveyResponse[]
+
+  @@map("surveys")
+}
+
+model SurveyResponse {
+  id           String   @id @default(uuid()) @db.Uuid
+  surveyId     String   @map("survey_id") @db.Uuid
+  accountId    String   @map("account_id") @db.Uuid
+  answer       String // one of the survey's options
+  featureVotes Json     @default("[]") @map("feature_votes") // string[] of requested features
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  survey  Survey  @relation(fields: [surveyId], references: [id], onDelete: Cascade)
+  account Account @relation(fields: [accountId], references: [id], onDelete: Cascade)
+
+  @@unique([surveyId, accountId])
+  @@index([surveyId, answer])
+  @@map("survey_responses")
 }
 
 model PaymentMethod {

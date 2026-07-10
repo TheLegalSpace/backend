@@ -16,6 +16,7 @@ import { startNotificationDigestJob } from "./jobs/notificationDigest";
 import { startSubscriptionSweepJob } from "./jobs/subscriptionSweep";
 import { startConversationExpiryJob } from "./jobs/conversationExpiry";
 import { startConversationReminderJob } from "./jobs/conversationReminders";
+import { startDailyStatsJob } from "./jobs/dailyStats";
 
 import authRoutes from "./routes/auth";
 import profileRoutes from "./routes/profile";
@@ -36,6 +37,8 @@ import adminRoutes from "./routes/admin";
 import researchRoutes from "./routes/research";
 import serviceRoutes from "./routes/service";
 import membershipRoutes from "./routes/membership";
+import supportRoutes from "./routes/support";
+import surveyRoutes from "./routes/survey";
 import webhookRoutes from "./routes/webhooks";
 
 const buildServer = async () => {
@@ -93,6 +96,8 @@ const buildServer = async () => {
       api.register(researchRoutes, { prefix: "/research" });
       api.register(serviceRoutes, { prefix: "/services" });
       api.register(membershipRoutes, { prefix: "/membership" });
+      api.register(supportRoutes, { prefix: "/support" });
+      api.register(surveyRoutes, { prefix: "/surveys" });
     },
     { prefix: env.apiPrefix }
   );
@@ -117,6 +122,7 @@ const start = async () => {
   startSubscriptionSweepJob();
   startConversationExpiryJob();
   startConversationReminderJob();
+  startDailyStatsJob();
   console.log("[app] cron jobs scheduled");
 
   const shutdown = async () => {

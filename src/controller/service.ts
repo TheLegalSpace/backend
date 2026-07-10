@@ -2,6 +2,7 @@ import { FastifyRequest, FastifyReply } from "fastify";
 import {
   _createInquiry,
   _createEventPromotion,
+  _verifyPromotionPayment,
   _listMyServiceRequests,
   _getServiceRequest,
 } from "../logic/service";
@@ -46,24 +47,37 @@ export const createEventPromotion = async (req: FastifyRequest, reply: FastifyRe
       : [];
     return responseCreated(
       reply,
-      await _createEventPromotion(req.account.id, {
-        title: fields.title,
-        address: fields.address,
-        startAt: fields.startAt,
-        endAt: fields.endAt,
-        shareOnSocial: fields.shareOnSocial === "true",
-        links,
-        contactName: fields.contactName,
-        contactEmail: fields.contactEmail,
-        contactPhone: fields.contactPhone,
-        firmName: fields.firmName,
-        flyer: {
-          buffer: flyerBuffer,
-          mimetype: flyerMimetype,
-          filename: flyerFilename,
+      await _createEventPromotion(
+        req.account.id,
+        {
+          title: fields.title,
+          address: fields.address,
+          startAt: fields.startAt,
+          endAt: fields.endAt,
+          shareOnSocial: fields.shareOnSocial === "true",
+          links,
+          contactName: fields.contactName,
+          contactEmail: fields.contactEmail,
+          contactPhone: fields.contactPhone,
+          firmName: fields.firmName,
+          flyer: {
+            buffer: flyerBuffer,
+            mimetype: flyerMimetype,
+            filename: flyerFilename,
+          },
         },
-      })
+        fields.callbackUrl || undefined
+      )
     );
+  } catch (e) {
+    return responseBad(reply, e);
+  }
+};
+
+export const verifyPromotion = async (req: FastifyRequest, reply: FastifyReply) => {
+  try {
+    const { reference } = req.query as { reference: string };
+    return responseOk(reply, await _verifyPromotionPayment(req.account.id, reference));
   } catch (e) {
     return responseBad(reply, e);
   }

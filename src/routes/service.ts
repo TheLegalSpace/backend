@@ -4,6 +4,7 @@ import { requireRole } from "../middleware/requireRole";
 import {
   createInquiry,
   createEventPromotion,
+  verifyPromotion,
   listMine,
   getOne,
 } from "../controller/service";
@@ -38,6 +39,21 @@ export default async function serviceRoutes(fastify: FastifyInstance) {
 
   // Event promotion is multipart (flyer upload) — body validated in the controller/logic.
   fastify.post("/event-promotion", createEventPromotion);
+
+  // Client-side fallback to confirm a promotion payment (mirror of the webhook).
+  fastify.get(
+    "/event-promotion/verify",
+    {
+      schema: {
+        querystring: {
+          type: "object",
+          required: ["reference"],
+          properties: { reference: { type: "string" } },
+        },
+      },
+    },
+    verifyPromotion
+  );
 
   fastify.get(
     "/me",

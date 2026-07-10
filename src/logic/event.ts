@@ -6,6 +6,7 @@ import {
   createEvent,
   updateEvent,
   deleteEvent,
+  incrementEventClick,
 } from "../dao/event";
 import { paginate, buildPagination } from "../helpers/pagination";
 import { uploadToR2, MAX_AVATAR_BYTES } from "../services/storage";
@@ -28,6 +29,15 @@ export const _get = async (id: string): Promise<Response> => {
   const event = await findEventById(id);
   if (!event) throw notFound("Event not found");
   return response({ error: false, message: "Event retrieved", data: event });
+};
+
+// Beacon fired by the client when a user taps a promoted event's flyer /
+// registration link. Powers the approximate Clicks/CTR/CPC on the admin docket.
+export const _trackEventClick = async (id: string): Promise<Response> => {
+  const event = await findEventById(id);
+  if (!event) throw notFound("Event not found");
+  await incrementEventClick(id);
+  return response({ error: false, message: "Click recorded" });
 };
 
 export const _create = async (

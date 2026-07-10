@@ -43,5 +43,21 @@ export const uploadToR2 = async (input: UploadInput): Promise<{ key: string; url
   return { key: result.public_id, url: result.secure_url };
 };
 
+// Build a secure, signed delivery URL for a stored asset (identified by its
+// Cloudinary public_id / `s3Key`). Used by admins to view KYC documents.
+// NOTE (hardening TODO): verification docs are currently uploaded as public
+// `type: "upload"` assets, so `sign_url` signs the transform but does not truly
+// gate access. For enforced privacy, upload KYC docs with
+// `access_mode: "authenticated"` and serve time-limited token URLs.
+export const signedFileUrl = (publicId: string): string => {
+  // PDFs uploaded with resource_type "auto" are stored by Cloudinary as "image".
+  return cloudinary.url(publicId, {
+    resource_type: "image",
+    type: "upload",
+    secure: true,
+    sign_url: true,
+  });
+};
+
 export const MAX_AVATAR_BYTES = 10 * 1024 * 1024;
 export const MAX_ARTICLE_ASSET_BYTES = 25 * 1024 * 1024;

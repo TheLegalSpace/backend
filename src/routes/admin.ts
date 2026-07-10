@@ -2,6 +2,17 @@ import { FastifyInstance } from "fastify";
 import { authHook } from "../middleware/auth";
 import { requireRole } from "../middleware/requireRole";
 import {
+  adminListTickets,
+  adminGetTicket,
+  adminUpdateTicket,
+} from "../controller/support";
+import { adminSurveyStats } from "../controller/survey";
+import {
+  createAnnouncement,
+  listAnnouncements,
+  sendAnnouncement,
+} from "../controller/announcement";
+import {
   listAccounts,
   suspend,
   unsuspend,
@@ -14,6 +25,20 @@ import {
   listServiceRequests,
   getServiceRequest,
   updateServiceRequest,
+  dashboardMetrics,
+  usersMetrics,
+  subscriptionsMetrics,
+  revenueMetrics,
+  listPlans,
+  updatePlan,
+  verificationDocuments,
+  listDocket,
+  getDocketItem,
+  approveDocket,
+  rejectDocket,
+  createDocketPromotion,
+  searchInsights,
+  analyticsMetrics,
 } from "../controller/admin";
 
 const idParam = {
@@ -31,6 +56,73 @@ const accountIdParam = {
 export default async function adminRoutes(fastify: FastifyInstance) {
   fastify.addHook("onRequest", authHook);
   fastify.addHook("preHandler", requireRole("ADMIN"));
+
+  // ---- Metrics (aggregation-only, no migrations) ----
+  fastify.get("/metrics/dashboard", dashboardMetrics);
+  fastify.get("/metrics/users", usersMetrics);
+  fastify.get("/metrics/subscriptions", subscriptionsMetrics);
+  fastify.get(
+    "/metrics/revenue",
+    {
+      schema: {
+        querystring: {
+          type: "object",
+          properties: { months: { type: "integer", default: 12, minimum: 1, maximum: 36 } },
+        },
+      },
+    },
+    revenueMetrics
+  );
+  fastify.get(
+    "/metrics/search",
+    {
+      schema: {
+        querystring: {
+          type: "object",
+          properties: {
+            days: { type: "integer", default: 30, minimum: 1, maximum: 365 },
+            limit: { type: "integer", default: 10, minimum: 1, maximum: 50 },
+          },
+        },
+      },
+    },
+    searchInsights
+  );
+  fastify.get(
+    "/metrics/analytics",
+    {
+      schema: {
+        querystring: {
+          type: "object",
+          properties: {
+            days: { type: "integer", default: 30, minimum: 1, maximum: 365 },
+          },
+        },
+      },
+    },
+    analyticsMetrics
+  );
+
+  // ---- Plans (Edit Plan) ----
+  fastify.get("/plans", listPlans);
+  fastify.patch(
+    "/plans/:id",
+    {
+      schema: {
+        params: idParam,
+        body: {
+          type: "object",
+          properties: {
+            name: { type: "string", minLength: 1, maxLength: 120 },
+            priceKobo: { type: "integer", minimum: 0 },
+            features: { type: "array", items: { type: "string" } },
+            isActive: { type: "boolean" },
+          },
+        },
+      },
+    },
+    updatePlan
+  );
 
   fastify.get(
     "/accounts",
@@ -67,6 +159,11 @@ export default async function adminRoutes(fastify: FastifyInstance) {
     suspend
   );
   fastify.patch("/accounts/:id/unsuspend", { schema: { params: idParam } }, unsuspend);
+  fastify.get(
+    "/accounts/:accountId/verification-documents",
+    { schema: { params: accountIdParam } },
+    verificationDocuments
+  );
 
   fastify.get(
     "/kyc/queue",
@@ -106,6 +203,45 @@ export default async function adminRoutes(fastify: FastifyInstance) {
   fastify.delete("/posts/:id", { schema: { params: idParam } }, deletePost);
   fastify.delete("/reviews/:id", { schema: { params: idParam } }, deleteReview);
 
+  // ---- On The Docket (event promotions) ----
+  fastify.get(
+    "/docket",
+    {
+      schema: {
+        querystring: {
+          type: "object",
+          properties: {
+            eventStatus: {
+              type: "string",
+              enum: ["pending_payment", "pending_review", "published", "rejected", "past"],
+            },
+            paymentStatus: { type: "string", enum: ["pending", "paid"] },
+            page: { type: "integer", default: 1 },
+            limit: { type: "integer", default: 20 },
+          },
+        },
+      },
+    },
+    listDocket
+  );
+  fastify.post("/docket", createDocketPromotion); // multipart flyer — validated in controller
+  fastify.get("/docket/:id", { schema: { params: idParam } }, getDocketItem);
+  fastify.post("/docket/:id/approve", { schema: { params: idParam } }, approveDocket);
+  fastify.post(
+    "/docket/:id/reject",
+    {
+      schema: {
+        params: idParam,
+        body: {
+          type: "object",
+          required: ["reason"],
+          properties: { reason: { type: "string", minLength: 1, maxLength: 500 } },
+        },
+      },
+    },
+    rejectDocket
+  );
+
   fastify.get(
     "/service-requests",
     {
@@ -138,7 +274,17 @@ export default async function adminRoutes(fastify: FastifyInstance) {
           properties: {
             status: {
               type: "string",
-              enum: ["pending", "contacted", "closed", "active", "completed"],
+              enum: [
+                // inquiry lifecycle
+                "new",
+                "in_progress",
+                "lead_lost",
+                "closed",
+                // event-promotion lifecycle
+                "pending",
+                "active",
+                "completed",
+              ],
             },
             note: { type: "string", maxLength: 500 },
           },
@@ -146,6 +292,93 @@ export default async function adminRoutes(fastify: FastifyInstance) {
       },
     },
     updateServiceRequest
+  );
+
+  // ---- Support Center ----
+  fastify.get(
+    "/support/tickets",
+    {
+      schema: {
+        querystring: {
+          type: "object",
+          properties: {
+            status: { type: "string", enum: ["open", "in_progress", "closed"] },
+            category: { type: "string", enum: ["billing", "technical", "account", "general"] },
+            q: { type: "string" },
+            page: { type: "integer", default: 1 },
+            limit: { type: "integer", default: 20 },
+          },
+        },
+      },
+    },
+    adminListTickets
+  );
+  fastify.get("/support/tickets/:id", { schema: { params: idParam } }, adminGetTicket);
+  fastify.patch(
+    "/support/tickets/:id",
+    {
+      schema: {
+        params: idParam,
+        body: {
+          type: "object",
+          required: ["status"],
+          properties: { status: { type: "string", enum: ["open", "in_progress", "closed"] } },
+        },
+      },
+    },
+    adminUpdateTicket
+  );
+
+  // ---- Announcements ----
+  fastify.post(
+    "/announcements",
+    {
+      schema: {
+        body: {
+          type: "object",
+          required: ["title", "body"],
+          properties: {
+            title: { type: "string", minLength: 1, maxLength: 200 },
+            body: { type: "string", minLength: 1, maxLength: 5000 },
+            audience: { type: "string", enum: ["all", "lawyers", "firms", "clients"] },
+            sendNow: { type: "boolean" },
+            scheduledAt: { type: "string", format: "date-time" },
+          },
+        },
+      },
+    },
+    createAnnouncement
+  );
+  fastify.get(
+    "/announcements",
+    {
+      schema: {
+        querystring: {
+          type: "object",
+          properties: {
+            page: { type: "integer", default: 1 },
+            limit: { type: "integer", default: 20 },
+          },
+        },
+      },
+    },
+    listAnnouncements
+  );
+  fastify.post("/announcements/:id/send", { schema: { params: idParam } }, sendAnnouncement);
+
+  // ---- Legal News Survey ----
+  fastify.get(
+    "/surveys/:slug/stats",
+    {
+      schema: {
+        params: {
+          type: "object",
+          required: ["slug"],
+          properties: { slug: { type: "string" } },
+        },
+      },
+    },
+    adminSurveyStats
   );
 
   fastify.get(

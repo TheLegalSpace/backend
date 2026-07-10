@@ -6,10 +6,13 @@ import { uploadToR2, MAX_AVATAR_BYTES } from "../services/storage";
 import { dispatchNotification } from "../services/notification";
 import { INQUIRY_TYPES, computePromotionPricing } from "../config/service";
 import { CreateInquiryInput, CreateEventPromotionInput } from "../interface/service";
+import { env } from "../config/env";
+import * as paystack from "../services/paystack";
 import {
   createServiceRequest,
   findServiceRequestById,
   listServiceRequestsByAccount,
+  updateServiceRequest,
 } from "../dao/service";
 
 const notifySubmitter = async (accountId: string, serviceRequestId: string, type: string) => {
@@ -33,7 +36,7 @@ export const _createInquiry = async (
   const sr = await createServiceRequest({
     accountId,
     type: input.type,
-    status: "pending",
+    status: "new",
     paymentStatus: "not_required",
     contactName: input.contactName ?? null,
     contactEmail: input.contactEmail,
@@ -45,9 +48,30 @@ export const _createInquiry = async (
   return response({ error: false, message: "Service request submitted", data: sr });
 };
 
+// Resolve the Paystack redirect target for a promotion checkout. Mirrors the
+// membership open-redirect guard: only our frontend origin, configured allowed
+// origins, or localhost (dev) are permitted.
+const resolvePromotionCallback = (raw?: string): string => {
+  if (!raw) return new URL("/services/event-promotion/callback", env.frontendUrl).toString();
+  let url: URL;
+  try {
+    url = new URL(raw);
+  } catch {
+    throw badRequest("callbackUrl must be an absolute URL");
+  }
+  const isLocalhost = url.hostname === "localhost" || url.hostname === "127.0.0.1";
+  const allowed =
+    isLocalhost ||
+    url.origin === new URL(env.frontendUrl).origin ||
+    env.frontendAllowedOrigins.includes(url.origin);
+  if (!allowed) throw badRequest("callbackUrl origin is not allowed");
+  return url.toString();
+};
+
 export const _createEventPromotion = async (
   accountId: string,
-  input: CreateEventPromotionInput
+  input: CreateEventPromotionInput,
+  callbackUrl?: string
 ): Promise<Response> => {
   const startAt = new Date(input.startAt);
   const endAt = new Date(input.endAt);
@@ -68,6 +92,9 @@ export const _createEventPromotion = async (
 
   const pricing = computePromotionPricing(startAt, endAt, input.shareOnSocial);
 
+  // Create the Event as pending_payment (hidden from the feed, which only shows
+  // 'published') and the ServiceRequest as pending. The Event goes to
+  // pending_review on payment, then published on admin approval.
   const { serviceRequest, event } = await prisma.$transaction(async (tx) => {
     const event = await tx.event.create({
       data: {
@@ -77,7 +104,7 @@ export const _createEventPromotion = async (
         startAt,
         endAt,
         registrationUrl: input.links?.[0] ?? null,
-        status: "published", // auto-publish (no admin gate for now)
+        status: "pending_payment",
         createdByAdminId: null,
       },
     });
@@ -85,10 +112,8 @@ export const _createEventPromotion = async (
       data: {
         accountId,
         type: "event_promotion",
-        // PAYMENT TODO: set "pending" and gate the Event on a gateway webhook flipping
-        // paymentStatus -> "paid". For now we auto-mark paid and publish immediately.
-        status: "active",
-        paymentStatus: "paid",
+        status: "pending",
+        paymentStatus: "pending",
         contactName: input.contactName ?? null,
         contactEmail: input.contactEmail,
         contactPhone: input.contactPhone ?? null,
@@ -110,12 +135,102 @@ export const _createEventPromotion = async (
     return { serviceRequest, event };
   });
 
-  await notifySubmitter(accountId, serviceRequest.id, "event_promotion");
+  // Initialize the one-off Paystack charge. Payment confirmation (webhook or the
+  // /verify fallback) flips the promotion to paid and the Event to pending_review.
+  const init = await paystack.initializeTransaction({
+    email: input.contactEmail,
+    amountKobo: pricing.totalKobo,
+    callbackUrl: resolvePromotionCallback(callbackUrl),
+    metadata: {
+      kind: "event_promotion",
+      serviceRequestId: serviceRequest.id,
+      accountId,
+    },
+  });
+
   return response({
     error: false,
-    message: "Event promotion created",
-    data: { serviceRequest, event },
+    message: "Event promotion created — complete payment to submit for review",
+    data: {
+      serviceRequest,
+      event,
+      authorizationUrl: init.authorization_url,
+      reference: init.reference,
+      accessCode: init.access_code,
+    },
   });
+};
+
+// Shared confirmation used by both the webhook (charge.success with
+// metadata.kind === "event_promotion") and the /verify fallback. Idempotent:
+// re-delivery is a no-op once the promotion is already paid. Promotion revenue
+// is tracked on ServiceRequest.amount (paid) — deliberately NOT a Payment row,
+// so the Revenue page's Subscriptions vs On-The-Docket columns stay separate.
+export const activatePromotionFromCharge = async (charge: {
+  serviceRequestId: string;
+  reference: string;
+  amountKobo: number;
+  channel?: string | null;
+  paidAt?: Date;
+}): Promise<void> => {
+  const sr = await findServiceRequestById(charge.serviceRequestId);
+  if (!sr || sr.type !== "event_promotion") return;
+  if (sr.paymentStatus === "paid") return; // already processed
+
+  const paidAt = charge.paidAt ?? new Date();
+  const payload = { ...((sr.payload as any) || {}) };
+  payload.payment = {
+    reference: charge.reference,
+    amountKobo: charge.amountKobo,
+    channel: charge.channel ?? null,
+    paidAt: paidAt.toISOString(),
+  };
+
+  await prisma.$transaction(async (tx) => {
+    await tx.serviceRequest.update({
+      where: { id: sr.id },
+      data: { paymentStatus: "paid", status: "active", payload },
+    });
+    if (sr.eventId) {
+      await tx.event.update({
+        where: { id: sr.eventId },
+        data: { status: "pending_review" },
+      });
+    }
+  });
+
+  await dispatchNotification({
+    recipientAccountId: sr.accountId,
+    type: "service_request_received",
+    payload: { serviceRequestId: sr.id, serviceType: "event_promotion", stage: "payment_received" },
+    emailable: true,
+  });
+};
+
+export const _verifyPromotionPayment = async (
+  accountId: string,
+  reference: string
+): Promise<Response> => {
+  if (!reference) throw badRequest("reference is required");
+  const data = await paystack.verifyTransaction(reference);
+  if (data?.status !== "success") throw badRequest("Payment was not successful");
+  if (data?.metadata?.kind !== "event_promotion" || !data?.metadata?.serviceRequestId) {
+    throw badRequest("This reference is not for an event promotion");
+  }
+
+  await activatePromotionFromCharge({
+    serviceRequestId: data.metadata.serviceRequestId,
+    reference: data.reference,
+    amountKobo: data.amount,
+    channel: data.channel ?? null,
+    paidAt: data.paid_at ? new Date(data.paid_at) : new Date(),
+  });
+
+  const fresh = await findServiceRequestById(data.metadata.serviceRequestId);
+  if (fresh && fresh.accountId !== accountId) {
+    throw forbidden("You do not own this service request");
+  }
+  return response({ error: false, message: "Payment verified", data: fresh });
 };
 
 export const _listMyServiceRequests = async (

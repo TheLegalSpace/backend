@@ -26,6 +26,9 @@ export const findEventById = async (id: string) => {
   return prisma.event.findUnique({ where: { id } });
 };
 
+export const incrementEventClick = async (id: string) =>
+  prisma.event.update({ where: { id }, data: { clickCount: { increment: 1 } } });
+
 export const createEvent = async (data: any) => prisma.event.create({ data });
 export const updateEvent = async (id: string, data: any) =>
   prisma.event.update({ where: { id }, data });

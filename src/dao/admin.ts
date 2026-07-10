@@ -6,20 +6,26 @@ export const listAccounts = async (
   take: number
 ) => {
   const where: any = {};
+  const and: any[] = [];
   if (filters.role) where.role = filters.role;
   if (filters.status) where.status = filters.status;
   if (filters.q) {
-    where.OR = [
-      { fullName: { contains: filters.q, mode: "insensitive" } },
-      { email: { contains: filters.q, mode: "insensitive" } },
-    ];
+    and.push({
+      OR: [
+        { fullName: { contains: filters.q, mode: "insensitive" } },
+        { email: { contains: filters.q, mode: "insensitive" } },
+      ],
+    });
   }
   if (filters.verificationStatus) {
-    where.OR = [
-      { lawyerProfile: { verificationStatus: filters.verificationStatus } },
-      { firmProfile: { verificationStatus: filters.verificationStatus } },
-    ];
+    and.push({
+      OR: [
+        { lawyerProfile: { verificationStatus: filters.verificationStatus } },
+        { firmProfile: { verificationStatus: filters.verificationStatus } },
+      ],
+    });
   }
+  if (and.length) where.AND = and;
   const [items, total] = await Promise.all([
     prisma.account.findMany({
       where,
@@ -73,6 +79,12 @@ export const listKycQueue = async (skip: number, take: number) => {
   ]);
   return { lawyers, firms, total: lawyerCount + firmCount };
 };
+
+export const listVerificationDocuments = async (accountId: string) =>
+  prisma.verificationDocument.findMany({
+    where: { accountId },
+    orderBy: { createdAt: "desc" },
+  });
 
 export const recordAuditLog = async (data: {
   adminAccountId: string;

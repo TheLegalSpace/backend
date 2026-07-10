@@ -8,9 +8,13 @@ export type ServiceRequestType =
 export type InquiryType = Exclude<ServiceRequestType, "event_promotion">;
 
 export type ServiceRequestStatus =
-  | "pending"
-  | "contacted"
+  // Inquiry lifecycle (TLS Services admin)
+  | "new"
+  | "in_progress"
+  | "lead_lost"
   | "closed"
+  // Event-promotion lifecycle
+  | "pending"
   | "active"
   | "completed";
 

@@ -24,6 +24,12 @@ export const getPlansForRole = async (role: string) =>
 export const setPlanPaystackCode = async (id: string, paystackPlanCode: string) =>
   prisma.plan.update({ where: { id }, data: { paystackPlanCode } });
 
+export const listAllPlans = async () =>
+  prisma.plan.findMany({ orderBy: { priceKobo: "asc" } });
+
+export const updatePlan = async (id: string, data: Record<string, any>) =>
+  prisma.plan.update({ where: { id }, data });
+
 // ---- Subscriptions ----
 
 export const getSubscriptionByAccount = async (accountId: string) =>

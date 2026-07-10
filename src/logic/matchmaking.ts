@@ -4,6 +4,7 @@ import { Response, IntakePayload } from "../interface";
 import { runMatchmaking } from "../services/matchmaking";
 import { buildPagination, paginate } from "../helpers/pagination";
 import { maskAccount } from "../services/anonymity";
+import { logSearch } from "../dao/analytics";
 import {
   extractIntakeFromText,
   ExtractionInsufficientError,
@@ -119,6 +120,8 @@ export const _searchByText = async (
     score: i.score,
     matchedFactors: i.matchedFactors,
   }));
+
+  logSearch({ accountId: viewerId, query: trimmed, kind: "matchmaking_text", resultCount: total });
 
   return response({
     error: false,

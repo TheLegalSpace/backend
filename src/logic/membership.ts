@@ -29,6 +29,7 @@ import {
   getInvoiceById,
 } from "../dao/membership";
 import * as paystack from "../services/paystack";
+import { activatePromotionFromCharge } from "./service";
 
 // ---- helpers ----
 
@@ -394,6 +395,18 @@ export const _getInvoiceDownload = async (
 export const handlePaystackEvent = async (event: string, data: any): Promise<void> => {
   switch (event) {
     case "charge.success": {
+      // Event-promotion charges are one-off (not subscriptions) — route them to the
+      // promotion activation and stop before the membership-activation path.
+      if (data?.metadata?.kind === "event_promotion" && data?.metadata?.serviceRequestId) {
+        await activatePromotionFromCharge({
+          serviceRequestId: data.metadata.serviceRequestId,
+          reference: data.reference,
+          amountKobo: data.amount,
+          channel: data.channel ?? null,
+          paidAt: data.paid_at ? new Date(data.paid_at) : new Date(),
+        });
+        return;
+      }
       // Resolve the account: metadata first (initial checkout), email fallback (auto-renew charges).
       let account: any = data?.metadata?.accountId ? await findAccountById(data.metadata.accountId) : null;
       if (!account && data?.customer?.email) {

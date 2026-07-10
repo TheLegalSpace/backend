@@ -3,6 +3,7 @@ import { response } from "../helpers/utility";
 import { Response } from "../interface";
 import { paginate, buildPagination } from "../helpers/pagination";
 import { maskAccount } from "../services/anonymity";
+import { logSearch } from "../dao/analytics";
 
 const escapeLike = (q: string) => q.replace(/%/g, "\\%").replace(/_/g, "\\_");
 
@@ -71,6 +72,8 @@ export const _search = async (
     result.firms = items.map((a) => maskAccount(a as any, viewerId));
     total += count;
   }
+
+  logSearch({ accountId: viewerId, query: q, kind: "search", resultCount: total });
 
   return response({
     error: false,

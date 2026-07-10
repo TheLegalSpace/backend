@@ -6,6 +6,7 @@ import {
   _update,
   _delete,
   _uploadCover,
+  _trackEventClick,
 } from "../logic/event";
 import { responseOk, responseCreated, responseBad } from "../helpers/utility";
 
@@ -22,6 +23,15 @@ export const getById = async (req: FastifyRequest, reply: FastifyReply) => {
   try {
     const { id } = req.params as { id: string };
     return responseOk(reply, await _get(id));
+  } catch (e) {
+    return responseBad(reply, e);
+  }
+};
+
+export const trackClick = async (req: FastifyRequest, reply: FastifyReply) => {
+  try {
+    const { id } = req.params as { id: string };
+    return responseOk(reply, await _trackEventClick(id));
   } catch (e) {
     return responseBad(reply, e);
   }

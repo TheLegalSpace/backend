@@ -8,6 +8,7 @@ import {
   update,
   remove,
   uploadCover,
+  trackClick,
 } from "../controller/event";
 
 const idParam = {
@@ -50,6 +51,8 @@ export default async function eventRoutes(fastify: FastifyInstance) {
     list
   );
   fastify.get("/:id", { schema: { params: idParam } }, getById);
+  // Click beacon — any authenticated user who taps a promoted event.
+  fastify.post("/:id/click", { schema: { params: idParam } }, trackClick);
   fastify.post(
     "/",
     { schema: { body: eventBody }, preHandler: requireRole("ADMIN") },
