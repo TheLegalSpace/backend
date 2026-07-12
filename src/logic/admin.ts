@@ -20,6 +20,7 @@ import {
   listPromotions,
   promotionStats,
 } from "../dao/service";
+import { listEventsAdmin } from "../dao/event";
 import { listAllPlans, getPlanById, updatePlan } from "../dao/membership";
 import { createPlan } from "../services/paystack";
 import { uploadToR2, MAX_AVATAR_BYTES } from "../services/storage";
@@ -315,6 +316,34 @@ const computePromotionMetrics = async (event: any, amountKobo: number) => {
       byDevice: null, // not tracked — requires client-side instrumentation
     },
   };
+};
+
+// Admin: every event, all statuses, event-centric (covers both promotion and
+// editorial events). Stats mirror the docket cards (all events counted by status).
+export const _listAllEvents = async (
+  filters: { status?: string; q?: string },
+  page: number,
+  limit: number
+): Promise<Response> => {
+  const { skip, take, page: p, limit: l } = paginate(page, limit);
+  const [{ items, total }, stats] = await Promise.all([
+    listEventsAdmin(filters, skip, take),
+    promotionStats(),
+  ]);
+  return response({
+    error: false,
+    message: "Events retrieved",
+    data: {
+      items,
+      stats: {
+        totalEvents: Object.values(stats.statusCounts).reduce((a, b) => a + b, 0),
+        pendingEvents: stats.statusCounts.pending_review || 0,
+        approvedEvents: stats.statusCounts.published || 0,
+        revenueGeneratedKobo: stats.revenueKobo,
+      },
+      pagination: buildPagination(total, p, l),
+    },
+  });
 };
 
 export const _getDocketItem = async (id: string): Promise<Response> => {

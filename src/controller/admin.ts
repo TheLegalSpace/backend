@@ -16,6 +16,7 @@ import {
   _updatePlan,
   _verificationDocuments,
   _listDocket,
+  _listAllEvents,
   _getDocketItem,
   _approveDocket,
   _rejectDocket,
@@ -95,6 +96,15 @@ export const listDocket = async (req: FastifyRequest, reply: FastifyReply) => {
   try {
     const { eventStatus, paymentStatus, page, limit } = req.query as any;
     return responseOk(reply, await _listDocket({ eventStatus, paymentStatus }, page, limit));
+  } catch (e) {
+    return responseBad(reply, e);
+  }
+};
+
+export const listAllEvents = async (req: FastifyRequest, reply: FastifyReply) => {
+  try {
+    const { status, q, page, limit } = req.query as any;
+    return responseOk(reply, await _listAllEvents({ status, q }, page, limit));
   } catch (e) {
     return responseBad(reply, e);
   }

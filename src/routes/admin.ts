@@ -33,6 +33,7 @@ import {
   updatePlan,
   verificationDocuments,
   listDocket,
+  listAllEvents,
   getDocketItem,
   approveDocket,
   rejectDocket,
@@ -223,6 +224,27 @@ export default async function adminRoutes(fastify: FastifyInstance) {
       },
     },
     listDocket
+  );
+  // All events, every status (event-centric — includes editorial + promotion events).
+  fastify.get(
+    "/events",
+    {
+      schema: {
+        querystring: {
+          type: "object",
+          properties: {
+            status: {
+              type: "string",
+              enum: ["draft", "pending_payment", "pending_review", "published", "rejected", "past"],
+            },
+            q: { type: "string" },
+            page: { type: "integer", default: 1 },
+            limit: { type: "integer", default: 20 },
+          },
+        },
+      },
+    },
+    listAllEvents
   );
   fastify.post("/docket", createDocketPromotion); // multipart flyer — validated in controller
   fastify.get("/docket/:id", { schema: { params: idParam } }, getDocketItem);
