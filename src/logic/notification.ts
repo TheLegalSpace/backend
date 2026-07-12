@@ -7,6 +7,10 @@ import {
   markRead,
   markAllRead,
 } from "../dao/notification";
+import {
+  upsertPushSubscription,
+  deletePushSubscriptionByEndpoint,
+} from "../dao/pushSubscription";
 import { paginate, buildPagination } from "../helpers/pagination";
 
 const UNREAD_CACHE_KEY = (id: string) => `notif:unread:${id}`;
@@ -61,4 +65,32 @@ export const _markAllRead = async (accountId: string): Promise<Response> => {
   await markAllRead(accountId);
   await redis.del(UNREAD_CACHE_KEY(accountId)).catch(() => null);
   return response({ error: false, message: "All marked as read" });
+};
+
+export const _subscribePush = async (
+  accountId: string,
+  subscription: {
+    endpoint: string;
+    keys: { p256dh: string; auth: string };
+  },
+  deviceType?: string,
+  userAgent?: string
+): Promise<Response> => {
+  await upsertPushSubscription({
+    accountId,
+    endpoint: subscription.endpoint,
+    p256dh: subscription.keys.p256dh,
+    auth: subscription.keys.auth,
+    deviceType: deviceType ?? null,
+    userAgent: userAgent ?? null,
+  });
+  return response({ error: false, message: "Push subscription saved" });
+};
+
+export const _unsubscribePush = async (
+  accountId: string,
+  endpoint: string
+): Promise<Response> => {
+  await deletePushSubscriptionByEndpoint(accountId, endpoint);
+  return response({ error: false, message: "Push subscription removed" });
 };

@@ -38,6 +38,12 @@ export const env = {
 
   geminiApiKey: process.env.GEMINI_API_KEY || "",
 
+  // Web Push (VAPID). Private key stays server-side; the public key is embedded
+  // in the frontend as the applicationServerKey. Push no-ops if the pair is unset.
+  vapidPublicKey: process.env.VAPID_PUBLIC_KEY || "",
+  vapidPrivateKey: process.env.VAPID_PRIVATE_KEY || "",
+  vapidSubject: process.env.VAPID_SUBJECT || "mailto:support@thelegalspace.com",
+
   // WhatsApp (Meta Cloud API). Disabled until a verified WhatsApp Business number
   // + approved message templates exist — then flip WHATSAPP_ENABLED=true.
   whatsappEnabled: process.env.WHATSAPP_ENABLED === "true",

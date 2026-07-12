@@ -4,10 +4,20 @@ import { createNotification } from "../dao/notification";
 import { emitToAccount } from "../realtime/emitter";
 import { NotificationType } from "../interface";
 import { sendWhatsAppTemplate } from "./whatsapp";
+import { sendPushToAccount, buildPushPayload } from "./webPush";
 
 // Delivery transports. "in_app" is always sent (it backs the bell badge and is
 // the source of truth). Extra channels are best-effort side transports.
-export type NotificationChannel = "in_app" | "whatsapp";
+export type NotificationChannel = "in_app" | "whatsapp" | "web_push";
+
+// Web Push is default-on for every notification (it backs the closed-app PWA
+// experience), except these high-frequency/low-value types which stay in-app
+// only to avoid notification fatigue. A caller can still force push for a
+// suppressed type by passing channels: ["web_push"].
+const PUSH_SUPPRESSED_TYPES = new Set<NotificationType>([
+  "new_follower",
+  "post_liked",
+]);
 
 export interface DispatchNotificationInput {
   recipientAccountId: string;
@@ -33,6 +43,22 @@ export const dispatchNotification = async (data: DispatchNotificationInput) => {
     console.log(`[notification] inserted id=${notif.id} type=${data.type}`);
     emitToAccount(data.recipientAccountId, "notification", notif);
     await redis.del(`notif:unread:${data.recipientAccountId}`).catch(() => null);
+
+    // Best-effort Web Push for the closed-app case. Default-on unless the type
+    // is suppressed or the caller opts out by passing an explicit channels list
+    // that omits "web_push".
+    const explicitChannels = data.channels;
+    const pushEnabled = explicitChannels
+      ? explicitChannels.includes("web_push")
+      : !PUSH_SUPPRESSED_TYPES.has(data.type);
+    if (pushEnabled) {
+      await sendPushToAccount(
+        data.recipientAccountId,
+        buildPushPayload(notif)
+      ).catch((e) =>
+        console.error("[notification] web_push channel failed:", e?.message)
+      );
+    }
   } catch (err: any) {
     console.error("[notification] dispatch failed:", {
       type: data.type,

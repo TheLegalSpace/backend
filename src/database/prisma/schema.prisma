@@ -52,6 +52,7 @@ model Account {
   reviewsGiven      Review[]              @relation("ReviewsGiven")
   reviewsReceived   Review[]              @relation("ReviewsReceived")
   notifications     Notification[]
+  pushSubscriptions PushSubscription[]
   eventsCreated     Event[]
   verificationDocuments VerificationDocument[] @relation("AccountKyc")
   reviewedKycDocs       VerificationDocument[] @relation("AdminKycReview")
@@ -312,6 +313,27 @@ model Notification {
   @@index([recipientAccountId, createdAt(sort: Desc)])
   @@index([recipientAccountId, readAt])
   @@map("notifications")
+}
+
+// One row per browser/device Web-Push subscription. An account can have many
+// (phone + laptop, etc). `endpoint` is the unique device address; a re-enable
+// upserts on it rather than duplicating. Dead subs (404/410 on send) are pruned
+// automatically by services/webPush.ts.
+model PushSubscription {
+  id         String   @id @default(uuid()) @db.Uuid
+  accountId  String   @map("account_id") @db.Uuid
+  endpoint   String   @unique
+  p256dh     String
+  auth       String
+  deviceType String?  @map("device_type")
+  userAgent  String?  @map("user_agent")
+  createdAt  DateTime @default(now()) @map("created_at")
+  updatedAt  DateTime @updatedAt @map("updated_at")
+
+  account Account @relation(fields: [accountId], references: [id], onDelete: Cascade)
+
+  @@index([accountId])
+  @@map("push_subscriptions")
 }
 
 model Event {

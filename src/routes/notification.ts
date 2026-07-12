@@ -5,8 +5,11 @@ import {
   unreadCount,
   markRead,
   markAllRead,
+  subscribePush,
+  unsubscribePush,
 } from "../controller/notification";
 import { paginationQuery } from "../dto/profile";
+import { subscribePushSchema, unsubscribePushSchema } from "../dto/notification";
 
 export default async function notificationRoutes(fastify: FastifyInstance) {
   fastify.addHook("onRequest", authHook);
@@ -27,4 +30,18 @@ export default async function notificationRoutes(fastify: FastifyInstance) {
     markRead
   );
   fastify.patch("/read-all", markAllRead);
+
+  // Web Push device subscriptions. Canonical /push/* paths + bare aliases so the
+  // frontend works whether it calls /notifications/push/subscribe or
+  // /notifications/subscribe. Unsubscribe accepts POST and DELETE.
+  const subOpts = { schema: subscribePushSchema };
+  const unsubOpts = { schema: unsubscribePushSchema };
+
+  fastify.post("/push/subscribe", subOpts, subscribePush);
+  fastify.post("/subscribe", subOpts, subscribePush);
+
+  fastify.post("/push/unsubscribe", unsubOpts, unsubscribePush);
+  fastify.delete("/push/unsubscribe", unsubOpts, unsubscribePush);
+  fastify.post("/unsubscribe", unsubOpts, unsubscribePush);
+  fastify.delete("/unsubscribe", unsubOpts, unsubscribePush);
 }
