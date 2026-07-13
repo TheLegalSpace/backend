@@ -141,7 +141,11 @@ export const _getFeedEvents = async (
   limit: number
 ): Promise<Response> => {
   const { skip, take, page: p, limit: l } = paginate(page, limit);
-  const where = { status: "published", startAt: { gte: new Date() } };
+  const now = new Date();
+  const where = {
+    status: "published",
+    OR: [{ endAt: { gte: now } }, { endAt: null, startAt: { gte: now } }],
+  };
   const [items, total] = await Promise.all([
     prisma.event.findMany({ where, orderBy: { startAt: "asc" }, skip, take }),
     prisma.event.count({ where }),
@@ -164,8 +168,12 @@ export const _getSidebar = async (): Promise<Response> => {
       });
     } catch {}
   }
+  const sidebarNow = new Date();
   const upcomingEvents = await prisma.event.findMany({
-    where: { status: "published", startAt: { gte: new Date() } },
+    where: {
+      status: "published",
+      OR: [{ endAt: { gte: sidebarNow } }, { endAt: null, startAt: { gte: sidebarNow } }],
+    },
     orderBy: { startAt: "asc" },
     take: 5,
   });

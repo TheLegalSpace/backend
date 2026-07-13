@@ -9,7 +9,10 @@ export const listEvents = async (
   const where =
     status === "past"
       ? { OR: [{ status: "past" }, { endAt: { lt: now } }] }
-      : { status: "published", startAt: { gte: now } };
+      : {
+          status: "published",
+          OR: [{ endAt: { gte: now } }, { endAt: null, startAt: { gte: now } }],
+        };
   const [items, total] = await Promise.all([
     prisma.event.findMany({
       where,
