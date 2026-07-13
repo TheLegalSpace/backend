@@ -33,7 +33,9 @@ const inquiryBody = {
 
 export default async function serviceRoutes(fastify: FastifyInstance) {
   fastify.addHook("onRequest", authHook);
-  fastify.addHook("preHandler", requireRole("LAWYER", "FIRM"));
+  // TLS Services (inquiries + event promotion) are open to all account types —
+  // clients, lawyers and firms can all host/promote events and submit inquiries.
+  fastify.addHook("preHandler", requireRole("USER", "LAWYER", "FIRM"));
 
   fastify.post("/requests", { schema: { body: inquiryBody } }, createInquiry);
 
