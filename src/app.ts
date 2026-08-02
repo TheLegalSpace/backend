@@ -44,10 +44,43 @@ import webhookRoutes from "./routes/webhooks";
 
 const buildServer = async () => {
   const app = Fastify({
-    logger: isProd
-      ? true
-      : { transport: { target: "pino-pretty", options: { translateTime: "SYS:HH:MM:ss" } } },
+    logger: {
+      // Render captures stdout and indexes one entry per line, so production
+      // stays raw JSON — multi-line pretty output would split a single request
+      // across several unsearchable entries. Pretty-printing is local-only.
+      ...(isProd
+        ? {}
+        : {
+            transport: {
+              target: "pino-pretty",
+              options: { translateTime: "SYS:HH:MM:ss" },
+            },
+          }),
+      redact: ["req.headers.authorization", "req.headers.cookie"],
+    },
+    // Replaced by the single-line onResponse hook below — the built-in pair logs
+    // every request twice and never reports status and duration together.
+    disableRequestLogging: true,
     trustProxy: true,
+  });
+
+  // Swagger assets and the Render health probe are constant background traffic;
+  // logging them buries the requests you actually want to read.
+  const SKIP_REQUEST_LOG = /^\/(health|docs|favicon)/;
+  app.addHook("onResponse", (req, reply, done) => {
+    if (!SKIP_REQUEST_LOG.test(req.url)) {
+      req.log.info(
+        {
+          method: req.method,
+          url: req.url,
+          status: reply.statusCode,
+          ms: Math.round(reply.elapsedTime),
+          ip: req.ip,
+        },
+        "request"
+      );
+    }
+    done();
   });
 
   await app.register(cors, { origin: true, credentials: true });

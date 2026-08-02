@@ -24,6 +24,30 @@ const sessionFrom = (s: any) => ({
   expiresAt: s.expires_at,
 });
 
+// Supabase owns delivery of the signup/reset codes, so a missing code is only
+// ever visible in its send response. Log every outcome with the upstream
+// status/code so Render logs answer "did it go out?" without needing a repro.
+// The project-wide email cap is the common failure and gets its own line.
+const logMailSend = (stage: string, email: string, err?: any) => {
+  if (!err) {
+    console.log(`[auth] ${stage} email accepted by supabase email=${email}`);
+    return;
+  }
+  const fields = {
+    status: err?.status,
+    code: err?.code ?? err?.error_code,
+    message: err?.message,
+  };
+  if (fields.status === 429 || fields.code === "over_email_send_rate_limit") {
+    console.error(
+      `[auth] ${stage} email BLOCKED — supabase email rate limit hit (project-wide cap, no code was sent) email=${email}`,
+      fields
+    );
+    return;
+  }
+  console.error(`[auth] ${stage} email send failed email=${email}`, fields);
+};
+
 interface RegisterStartBody {
   email: string;
   password: string;
@@ -38,6 +62,8 @@ export const _registerStart = async (body: RegisterStartBody): Promise<Response>
     throw conflict("An account with this email already exists");
   }
 
+  console.log(`[auth] register.start email=${body.email} role=${body.role}`);
+
   const created = await supabaseAdmin.auth.admin.createUser({
     email: body.email,
     password: body.password,
@@ -50,12 +76,21 @@ export const _registerStart = async (body: RegisterStartBody): Promise<Response>
       (created.error as any).status === 422
     ) {
       // fall through to resend
+      console.log(
+        `[auth] register.start auth user already exists, resending email=${body.email}`
+      );
     } else {
+      console.error(`[auth] register.start createUser failed email=${body.email}`, {
+        status: (created.error as any)?.status,
+        code: (created.error as any)?.code,
+        message: created.error.message,
+      });
       throw new Error(created.error.message || "Failed to create auth user");
     }
   }
 
   const resent = await supabase.auth.resend({ type: "signup", email: body.email });
+  logMailSend("register.start", body.email, resent.error);
   if (resent.error) {
     throw new Error(resent.error.message || "Failed to send verification code");
   }
@@ -70,7 +105,9 @@ export const _registerStart = async (body: RegisterStartBody): Promise<Response>
 };
 
 export const _registerResend = async (email: string): Promise<Response> => {
+  console.log(`[auth] register.resend requested email=${email}`);
   const resent = await supabase.auth.resend({ type: "signup", email });
+  logMailSend("register.resend", email, resent.error);
   if (resent.error) {
     throw new Error(resent.error.message || "Failed to resend verification code");
   }
@@ -93,8 +130,16 @@ export const _registerVerify = async (body: RegisterVerifyBody): Promise<Respons
     type: "signup",
   });
   if (error || !data?.session || !data?.user) {
+    // Pairs with the register.start/resend lines above — lets you tell a code
+    // that never arrived from one that arrived and was entered wrong or late.
+    console.error(`[auth] register.verify rejected email=${body.email}`, {
+      status: (error as any)?.status,
+      code: (error as any)?.code,
+      message: error?.message,
+    });
     throw unauthorized(error?.message || "Invalid or expired verification code");
   }
+  console.log(`[auth] register.verify ok email=${body.email}`);
 
   const authUserId = data.user.id;
   const session = sessionFrom(data.session);
@@ -266,7 +311,10 @@ export const _logout = async (authUserId: string, accessToken: string): Promise<
 };
 
 export const _forgotPassword = async (email: string): Promise<Response> => {
+  // Shares the same project-wide email quota as the signup codes, so a burst of
+  // resets is enough to starve registration (and vice versa).
   const { error } = await supabase.auth.resetPasswordForEmail(email);
+  logMailSend("forgot-password", email, error);
   if (error) throw new Error(error.message);
   return response({ error: false, message: "Password reset email sent" });
 };
