@@ -2,7 +2,13 @@ import { response, badRequest, conflict, forbidden, notFound, serviceUnavailable
 import { Response } from "../interface";
 import { MembershipView, PlanView } from "../interface/membership";
 import { paginate, buildPagination } from "../helpers/pagination";
-import { professionalPlanCodeForRole, INVOICE_PREFIX } from "../config/membership";
+import {
+  professionalPlanCodeForRole,
+  INVOICE_PREFIX,
+  INTERVAL_MONTHS,
+  BILLING_INTERVALS,
+  isBillingInterval,
+} from "../config/membership";
 import { env } from "../config/env";
 import { dispatchNotification } from "../services/notification";
 import { generateInvoicePdf } from "../services/invoice";
@@ -13,6 +19,7 @@ import {
   getPlanById,
   getPlanByPaystackCode,
   getPlansForRole,
+  setPlanPaystackCode,
   getSubscriptionByAccount,
   findSubscriptionByPaystackCode,
   upsertSubscription,
@@ -30,6 +37,7 @@ import {
 } from "../dao/membership";
 import * as paystack from "../services/paystack";
 import { activatePromotionFromCharge } from "./service";
+import { activateCreditPurchase } from "./credits";
 
 // ---- helpers ----
 
@@ -245,6 +253,53 @@ const resolveCallbackUrl = (raw?: string): URL => {
   return url;
 };
 
+/**
+ * Guarantees Paystack will charge exactly the price we quoted.
+ *
+ * When a transaction is initialized with a `plan` code, Paystack ignores the
+ * `amount` we send and bills the plan's own amount. So if the Plan row's price
+ * and the Paystack plan's amount ever drift apart — a price edit, a plan created
+ * by hand in the dashboard, a term added after the fact — the member sees one
+ * figure on the payment page and is charged another. That is exactly the "page
+ * said ₦100k, Paystack routed ₦50k" report.
+ *
+ * Before every checkout we read the plan back and, if the amount or interval
+ * disagrees (or no Paystack plan exists yet), register a fresh one at our price
+ * and repoint the row. Existing subscribers stay on the plan they signed up to;
+ * only new checkouts move.
+ */
+const ensurePaystackPlan = async (plan: any): Promise<string> => {
+  const expectedInterval = plan.intervalMonths === 12 ? "annually" : "biannually";
+
+  if (plan.paystackPlanCode) {
+    try {
+      const remote = await paystack.getPlan(plan.paystackPlanCode);
+      if (remote.amount === plan.priceKobo && remote.interval === expectedInterval) {
+        return plan.paystackPlanCode;
+      }
+      console.warn(
+        `[membership] Paystack plan ${plan.paystackPlanCode} is ${remote.amount} kobo/${remote.interval} but ${plan.code} is ${plan.priceKobo} kobo/${expectedInterval} — re-registering`
+      );
+    } catch (err: any) {
+      // Couldn't verify (network/API hiccup). Keep the known code rather than
+      // blocking every checkout, but make the gap visible in the logs.
+      console.error(
+        `[membership] could not verify Paystack plan ${plan.paystackPlanCode}: ${err?.message}`
+      );
+      return plan.paystackPlanCode;
+    }
+  }
+
+  const { plan_code } = await paystack.createPlan({
+    name: `${plan.name} (${plan.forRole ?? "ALL"})`,
+    amountKobo: plan.priceKobo,
+    intervalMonths: plan.intervalMonths,
+  });
+  await setPlanPaystackCode(plan.id, plan_code);
+  console.log(`[membership] registered Paystack plan for ${plan.code}: ${plan_code}`);
+  return plan_code;
+};
+
 // `context` tags where the checkout was started ("onboarding" during registration,
 // anything else/absent = dashboard). It is round-tripped onto the Paystack callback
 // redirect as ?context=... so the frontend callback page knows where to send the
@@ -252,7 +307,8 @@ const resolveCallbackUrl = (raw?: string): URL => {
 export const _subscribe = async (
   account: any,
   context?: string,
-  callbackUrl?: string
+  callbackUrl?: string,
+  intervalMonths?: number
 ): Promise<Response> => {
   if (account.membershipTier === "professional") {
     const sub = await getSubscriptionByAccount(account.id);
@@ -260,13 +316,30 @@ export const _subscribe = async (
       throw conflict("You already have an active professional membership");
     }
   }
-  const code = professionalPlanCodeForRole(account.role);
+
+  // The billing term the member picked on the payment page. Anything we don't
+  // sell is rejected rather than silently downgraded to the 6-month plan — a
+  // member choosing "1 year" must not end up on a biannual charge.
+  const term = intervalMonths ?? INTERVAL_MONTHS;
+  if (!isBillingInterval(term)) {
+    throw badRequest(
+      `Unsupported billing term. Choose ${BILLING_INTERVALS.join(" or ")} months.`
+    );
+  }
+
+  const code = professionalPlanCodeForRole(account.role, term);
   if (!code) throw badRequest("Professional membership is only available to lawyers and firms");
 
   const plan = await getPlanByCode(code);
   if (!plan) throw notFound("Plan not found");
-  if (!plan.paystackPlanCode) {
-    throw serviceUnavailable("This plan is not yet configured on Paystack. Contact support.");
+
+  let paystackPlanCode: string;
+  try {
+    paystackPlanCode = await ensurePaystackPlan(plan);
+  } catch (err: any) {
+    throw serviceUnavailable(
+      `This plan is not yet configured on Paystack. Contact support. (${err?.message ?? "unknown"})`
+    );
   }
 
   const redirect = resolveCallbackUrl(callbackUrl);
@@ -275,9 +348,17 @@ export const _subscribe = async (
   const init = await paystack.initializeTransaction({
     email: account.email,
     amountKobo: plan.priceKobo,
-    planCode: plan.paystackPlanCode,
+    planCode: paystackPlanCode,
     callbackUrl: redirect.toString(),
-    metadata: { accountId: account.id, planId: plan.id, context: context ?? "dashboard" },
+    metadata: {
+      // `kind` tags what this charge is for — the webhook and the verify
+      // endpoints use it to route one-off charges (promotions, credit packs)
+      // away from membership activation.
+      kind: "membership",
+      accountId: account.id,
+      planId: plan.id,
+      context: context ?? "dashboard",
+    },
   });
 
   return response({
@@ -287,6 +368,10 @@ export const _subscribe = async (
       authorizationUrl: init.authorization_url,
       reference: init.reference,
       accessCode: init.access_code,
+      // Echo back exactly what will be charged, so the client can reconcile the
+      // figure it displayed before sending the member off to Paystack.
+      amountKobo: plan.priceKobo,
+      intervalMonths: plan.intervalMonths,
       plan: toPlanView(plan),
     },
   });
@@ -299,13 +384,40 @@ export const _verifyPayment = async (account: any, reference: string): Promise<R
     throw badRequest("Payment was not successful");
   }
 
+  // One-off charges (event promotions, credit packs) have their own verify
+  // endpoints and their own webhook branches. Without this guard a credit-pack
+  // reference sent here would fall through to the role-default plan and hand out
+  // a membership for the price of a top-up.
+  const kind = data?.metadata?.kind;
+  if (kind && kind !== "membership") {
+    throw badRequest(
+      `This payment was not a membership purchase (${kind}). Verify it on its own endpoint.`
+    );
+  }
+
   const planId = data?.metadata?.planId;
   let plan = planId ? await getPlanById(planId) : null;
+  // Fall back to the Paystack plan the charge actually ran against before
+  // falling back to the role default — otherwise a member who paid for a year
+  // could be activated on the 6-month term.
+  if (!plan && data?.plan) {
+    plan = await getPlanByPaystackCode(
+      typeof data.plan === "string" ? data.plan : data.plan?.plan_code
+    );
+  }
   if (!plan) {
     const code = professionalPlanCodeForRole(account.role);
     plan = code ? await getPlanByCode(code) : null;
   }
   if (!plan) throw notFound("Plan not found");
+
+  if (typeof data.amount === "number" && data.amount !== plan.priceKobo) {
+    // Not fatal — the money has already moved and the member must get what they
+    // paid for — but it means the quoted price and the charge diverged.
+    console.warn(
+      `[membership] charge ${data.reference} was ${data.amount} kobo but plan ${plan.code} is ${plan.priceKobo} kobo`
+    );
+  }
 
   await activateFromCharge(account, plan, {
     reference: data.reference,
@@ -404,6 +516,21 @@ export const handlePaystackEvent = async (event: string, data: any): Promise<voi
           amountKobo: data.amount,
           channel: data.channel ?? null,
           paidAt: data.paid_at ? new Date(data.paid_at) : new Date(),
+        });
+        return;
+      }
+      // Credit-pack top-ups are one-off charges too — credit the wallet and stop
+      // before the membership-activation path. Idempotent on the reference.
+      if (
+        data?.metadata?.kind === "credit_pack" &&
+        data?.metadata?.accountId &&
+        data?.metadata?.packCode
+      ) {
+        await activateCreditPurchase({
+          accountId: data.metadata.accountId,
+          packCode: data.metadata.packCode,
+          reference: data.reference,
+          amountKobo: data.amount,
         });
         return;
       }

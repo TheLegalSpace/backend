@@ -23,6 +23,25 @@ import { maskAccount } from "../services/anonymity";
 
 const REQUEST_TTL_DAYS = 7;
 
+// The intake's `matter` is a PracticeArea id. Notifications and the conversation
+// header want the human name, so resolve it (best-effort — a missing area just
+// drops the label rather than failing the action that triggered it).
+export const matterNameOf = async (intakePayload: any): Promise<string | null> => {
+  const matterId = intakePayload?.matter;
+  if (typeof matterId !== "string" || !matterId) return null;
+  const area = await prisma.practiceArea
+    .findUnique({ where: { id: matterId }, select: { name: true } })
+    .catch(() => null);
+  return area?.name ?? null;
+};
+
+// First line of what the client actually typed in the "Get a Lawyer" intake.
+export const intakeSnippet = (intakePayload: any, max = 140): string | null => {
+  const text = typeof intakePayload?.freeText === "string" ? intakePayload.freeText.trim() : "";
+  if (!text) return null;
+  return text.length > max ? `${text.slice(0, max - 1)}…` : text;
+};
+
 export const _createRequest = async (
   userAccountId: string,
   body: { lawyerAccountId: string; intakePayload: any }
@@ -73,7 +92,15 @@ export const _createRequest = async (
   await dispatchNotification({
     recipientAccountId: body.lawyerAccountId,
     type: "new_request",
-    payload: { requestId: request.id, matter: body.intakePayload?.matter },
+    payload: {
+      requestId: request.id,
+      actorAccountId: userAccountId,
+      matter: body.intakePayload?.matter,
+      // `matter` is a PracticeArea id — resolve the name so the notification can
+      // say "Tenancy Law" instead of a UUID.
+      matterName: await matterNameOf(body.intakePayload),
+      snippet: intakeSnippet(body.intakePayload),
+    },
   });
   emitToAccount(body.lawyerAccountId, "request:new", { requestId: request.id });
 
@@ -192,6 +219,31 @@ export const _acceptLead = async (
       },
     });
 
+    // Seed the thread with what the client actually wrote in the "Get a Lawyer"
+    // intake, authored by the client. The lawyer accepted a lead off the back of
+    // that complaint, so it is the first thing they should read — and because it
+    // is a real Message it also drives the sidebar preview, message history and
+    // the unread badge instead of needing special-casing in the UI.
+    const complaint = intakeSnippet(existing.intakePayload, 10_000);
+    if (complaint) {
+      const seeded = await tx.message.create({
+        data: {
+          conversationId: conversation.id,
+          senderAccountId: existing.userAccountId,
+          body: complaint,
+        },
+      });
+      await tx.conversation.update({
+        where: { id: conversation.id },
+        data: {
+          lastMessageAt: seeded.createdAt,
+          lastMessagePreview: complaint.slice(0, 80),
+        },
+      });
+      conversation.lastMessageAt = seeded.createdAt;
+      conversation.lastMessagePreview = complaint.slice(0, 80);
+    }
+
     const updated = await tx.request.update({
       where: { id },
       data: {
@@ -228,6 +280,8 @@ export const _acceptLead = async (
     payload: {
       requestId: result.request.id,
       conversationId: result.conversation.id,
+      actorAccountId: result.request.lawyerAccountId,
+      matterName: await matterNameOf(result.request.intakePayload),
     },
   });
   emitToAccount(result.request.userAccountId, "request:status_changed", {
@@ -261,7 +315,12 @@ export const _declineLead = async (
   await dispatchNotification({
     recipientAccountId: r.userAccountId,
     type: "request_declined",
-    payload: { requestId: id, reason },
+    payload: {
+      requestId: id,
+      reason,
+      actorAccountId: r.lawyerAccountId,
+      matterName: await matterNameOf(r.intakePayload),
+    },
   });
   emitToAccount(r.userAccountId, "request:status_changed", {
     requestId: id,

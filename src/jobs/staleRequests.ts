@@ -1,6 +1,7 @@
 import cron from "node-cron";
 import { prisma } from "../config/database";
 import { dispatchNotification } from "../services/notification";
+import { matterNameOf } from "../logic/request";
 
 export const startStaleRequestJob = () => {
   cron.schedule("0 * * * *", async () => {
@@ -15,7 +16,13 @@ export const startStaleRequestJob = () => {
         expiryWarningSentAt: null,
         expiresAt: { gt: now, lte: soon },
       },
-      select: { id: true, userAccountId: true, lawyerAccountId: true, expiresAt: true },
+      select: {
+        id: true,
+        userAccountId: true,
+        lawyerAccountId: true,
+        expiresAt: true,
+        intakePayload: true,
+      },
     });
     if (expiring.length > 0) {
       await prisma.request.updateMany({
@@ -24,15 +31,27 @@ export const startStaleRequestJob = () => {
       });
       for (const r of expiring) {
         // The user owns the request; the lawyer is nudged to respond before it lapses.
+        // Each side sees the other party's name plus what the matter was about.
+        const matterName = await matterNameOf(r.intakePayload);
         await dispatchNotification({
           recipientAccountId: r.userAccountId,
           type: "request_expiring",
-          payload: { requestId: r.id, expiresAt: r.expiresAt },
+          payload: {
+            requestId: r.id,
+            expiresAt: r.expiresAt,
+            actorAccountId: r.lawyerAccountId,
+            matterName,
+          },
         });
         await dispatchNotification({
           recipientAccountId: r.lawyerAccountId,
           type: "request_expiring",
-          payload: { requestId: r.id, expiresAt: r.expiresAt },
+          payload: {
+            requestId: r.id,
+            expiresAt: r.expiresAt,
+            actorAccountId: r.userAccountId,
+            matterName,
+          },
         });
       }
       console.log(`[cron] warned ${expiring.length} requests about to expire`);
@@ -41,7 +60,12 @@ export const startStaleRequestJob = () => {
     // 2. Expire requests past their deadline.
     const stale = await prisma.request.findMany({
       where: { status: "pending", expiresAt: { lt: now } },
-      select: { id: true, userAccountId: true },
+      select: {
+        id: true,
+        userAccountId: true,
+        lawyerAccountId: true,
+        intakePayload: true,
+      },
     });
     if (stale.length === 0) return;
     await prisma.request.updateMany({
@@ -52,7 +76,11 @@ export const startStaleRequestJob = () => {
       await dispatchNotification({
         recipientAccountId: s.userAccountId,
         type: "request_expired",
-        payload: { requestId: s.id },
+        payload: {
+          requestId: s.id,
+          actorAccountId: s.lawyerAccountId,
+          matterName: await matterNameOf(s.intakePayload),
+        },
       });
     }
     console.log(`[cron] expired ${stale.length} stale requests`);

@@ -52,7 +52,13 @@ export const _submitReview = async (
   await dispatchNotification({
     recipientAccountId: reviewedAccountId,
     type: "new_review",
-    payload: { reviewId: review.id, rating: body.rating },
+    payload: {
+      reviewId: review.id,
+      rating: body.rating,
+      actorAccountId: reviewerAccountId,
+      conversationId,
+      snippet: body.body ? body.body.slice(0, 120) : null,
+    },
   });
 
   return response({ error: false, message: "Review submitted", data: review });

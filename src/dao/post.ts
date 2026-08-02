@@ -1,5 +1,32 @@
 import { prisma } from "../config/database";
 
+/**
+ * The three rules that decide whether a viewer sees a post, as a reusable
+ * Prisma `where` fragment. Spread it into any post query that renders to a
+ * human (feed, profile listings, single post):
+ *
+ *  1. not soft-deleted;
+ *  2. not auto-hidden — unless you're the author, who keeps seeing their own
+ *     post (with `moderationStatus: "under_review"`) rather than watching it
+ *     vanish with no explanation;
+ *  3. not something you personally reported — reporting a post means you asked
+ *     not to see it, so it leaves your feed immediately.
+ *
+ * Admin queries deliberately do NOT use this — moderators need the full set.
+ */
+export const visiblePostWhere = (viewerId: string) => ({
+  deletedAt: null,
+  OR: [{ autoHiddenAt: null }, { authorAccountId: viewerId }],
+  reports: { none: { reporterAccountId: viewerId } },
+});
+
+/** Author-facing moderation state for a post the viewer owns. Null for everyone else. */
+export const moderationStatusFor = (
+  post: { authorAccountId: string; autoHiddenAt: Date | null },
+  viewerId: string
+): "under_review" | null =>
+  post.autoHiddenAt && post.authorAccountId === viewerId ? "under_review" : null;
+
 export const createPost = async (data: {
   authorAccountId: string;
   title?: string | null;
@@ -14,9 +41,18 @@ export const createPost = async (data: {
   });
 };
 
+/** Raw lookup — any non-deleted post, regardless of moderation state. Use for owner/admin/report paths. */
 export const findPostById = async (id: string) => {
   return prisma.post.findFirst({
     where: { id, deletedAt: null },
+    include: { author: true },
+  });
+};
+
+/** Reader-facing lookup — applies the same visibility rules as the feed. */
+export const findVisiblePostById = async (id: string, viewerId: string) => {
+  return prisma.post.findFirst({
+    where: { id, ...visiblePostWhere(viewerId) },
     include: { author: true },
   });
 };

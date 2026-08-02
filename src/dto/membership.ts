@@ -12,6 +12,20 @@ export const verifyQuerySchema = {
   },
 };
 
+// Checkout. The billing term is optional and defaults to the 6-month plan;
+// `intervalMonths` is canonical, `interval` is the friendly alias.
+export const subscribeBodySchema = {
+  body: {
+    type: "object",
+    properties: {
+      context: { type: "string", maxLength: 40 },
+      callbackUrl: { type: "string", maxLength: 500 },
+      intervalMonths: { type: "integer", enum: [6, 12] },
+      interval: { type: "string", enum: ["biannual", "annual", "yearly"] },
+    },
+  },
+};
+
 export const autoRenewBodySchema = {
   body: {
     type: "object",

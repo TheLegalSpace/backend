@@ -97,6 +97,18 @@ export const _getConversation = async (
       lawyerAccount: maskAccount(conv.lawyerAccount as any, viewerId),
       matterName: area?.name ?? null,
       intakeSummary: freeText ? freeText.slice(0, 60) : null,
+      // The brief the client filled in before requesting this lawyer — what they
+      // said, what area it falls under, their budget and location. The complaint
+      // is also seeded as the first message in the thread, but the header card
+      // needs it whole and structured (the message is just prose).
+      intake: {
+        matterId: matterId ?? null,
+        matterName: area?.name ?? null,
+        budget: intake?.budget ?? null,
+        location: intake?.location ?? null,
+        preference: intake?.preference ?? null,
+        description: freeText || null,
+      },
     },
   });
 };
@@ -162,6 +174,7 @@ export const _sendMessage = async (
         conversationId,
         snippet: body.body.slice(0, 80),
         senderAccountId,
+        actorAccountId: senderAccountId,
       },
     });
   }
@@ -223,15 +236,16 @@ export const _closeConversation = async (
   const updated = await closeConversation(id, closedByAccountId);
   emitToConversation(id, "conversation:updated", updated);
 
+  // Each side is told who they're reviewing — the other participant.
   await dispatchNotification({
     recipientAccountId: conv.userAccountId,
     type: "review_request",
-    payload: { conversationId: id },
+    payload: { conversationId: id, actorAccountId: conv.lawyerAccountId },
   });
   await dispatchNotification({
     recipientAccountId: conv.lawyerAccountId,
     type: "review_request",
-    payload: { conversationId: id },
+    payload: { conversationId: id, actorAccountId: conv.userAccountId },
   });
   return response({ error: false, message: "Conversation closed", data: updated });
 };

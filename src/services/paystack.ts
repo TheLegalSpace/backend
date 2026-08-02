@@ -85,14 +85,33 @@ export const generateManageLink = async (code: string): Promise<{ link: string }
   return request("GET", `/subscription/${encodeURIComponent(code)}/manage/link`);
 };
 
+// Read a plan back so we can confirm Paystack will charge what we advertise.
+export const getPlan = async (
+  code: string
+): Promise<{ plan_code: string; amount: number; interval: string; name: string }> => {
+  return request("GET", `/plan/${encodeURIComponent(code)}`);
+};
+
 // One-off — used by a seed/admin script to create the Paystack Plan and capture its plan_code.
 export const createPlan = async (input: {
   name: string;
   amountKobo: number;
   intervalMonths: number;
 }): Promise<{ plan_code: string }> => {
-  // Paystack supports "biannually" (every 6 months) as a native interval.
-  const interval = input.intervalMonths === 6 ? "biannually" : "annually";
+  // We sell exactly two terms and Paystack has a native interval for each.
+  // Anything else is a bug upstream — fail loudly rather than quietly billing
+  // someone yearly because their term didn't match the 6-month branch.
+  const interval =
+    input.intervalMonths === 6
+      ? "biannually"
+      : input.intervalMonths === 12
+      ? "annually"
+      : null;
+  if (!interval) {
+    throw serviceUnavailable(
+      `Unsupported billing interval: ${input.intervalMonths} months. Plans are 6 or 12 months.`
+    );
+  }
   return request("POST", "/plan", {
     name: input.name,
     amount: input.amountKobo,

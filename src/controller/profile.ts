@@ -120,7 +120,7 @@ export const getProfileArticles = async (req: FastifyRequest, reply: FastifyRepl
   try {
     const { accountId } = req.params as { accountId: string };
     const { page, limit } = req.query as any;
-    return responseOk(reply, await _getProfileArticles(accountId, page, limit));
+    return responseOk(reply, await _getProfileArticles(accountId, req.account.id, page, limit));
   } catch (e) {
     return responseBad(reply, e);
   }

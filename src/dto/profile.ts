@@ -18,14 +18,19 @@ export const toggleAnonymousSchema = {
   },
 };
 
-// Each practice area carries its own fee range (min/max), in kobo.
+// Each practice area may carry its own fee range (min/max), in kobo.
+//
+// Fees are optional per area — a lawyer signing up shouldn't have to price every
+// specialism before they can finish onboarding. They default to 0 ("not stated")
+// and the logic layer requires a fee on at least one area, which is all the
+// matchmaking budget filter needs.
 const practiceAreaFeeSchema = {
   type: "object",
-  required: ["practiceAreaId", "minFee", "maxFee"],
+  required: ["practiceAreaId"],
   properties: {
     practiceAreaId: { type: "string", format: "uuid" },
-    minFee: { type: "integer", minimum: 0 },
-    maxFee: { type: "integer", minimum: 0 },
+    minFee: { type: "integer", minimum: 0, default: 0 },
+    maxFee: { type: "integer", minimum: 0, default: 0 },
   },
 };
 

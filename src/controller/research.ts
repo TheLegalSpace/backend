@@ -87,7 +87,7 @@ export const postMessage = async (req: FastifyRequest, reply: FastifyReply) => {
     }
     return responseCreated(
       reply,
-      await _postMessage(id, req.account.id, {
+      await _postMessage(id, req.account, {
         text,
         pdfBuffer,
         pdfMimetype,

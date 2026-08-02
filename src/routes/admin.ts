@@ -8,6 +8,12 @@ import {
 } from "../controller/support";
 import { adminSurveyStats } from "../controller/survey";
 import {
+  adminListReportedPosts,
+  adminGetReportedPost,
+  adminModerateReportedPost,
+} from "../controller/postReport";
+import { REPORT_REASON_VALUES } from "../config/moderation";
+import {
   createAnnouncement,
   listAnnouncements,
   sendAnnouncement,
@@ -203,6 +209,64 @@ export default async function adminRoutes(fastify: FastifyInstance) {
 
   fastify.delete("/posts/:id", { schema: { params: idParam } }, deletePost);
   fastify.delete("/reviews/:id", { schema: { params: idParam } }, deleteReview);
+
+  // ---- Content moderation (reported posts) ----
+  // Grouped by post, not by report — one decision resolves every open report
+  // on a piece of content.
+  fastify.get(
+    "/reports/posts",
+    {
+      schema: {
+        querystring: {
+          type: "object",
+          properties: {
+            status: { type: "string", enum: ["pending", "actioned", "dismissed"], default: "pending" },
+            reason: { type: "string", enum: REPORT_REASON_VALUES },
+            autoHiddenOnly: { type: "boolean", default: false },
+            page: { type: "integer", default: 1 },
+            limit: { type: "integer", default: 20 },
+          },
+        },
+      },
+    },
+    adminListReportedPosts
+  );
+  fastify.get(
+    "/reports/posts/:postId",
+    {
+      schema: {
+        params: {
+          type: "object",
+          required: ["postId"],
+          properties: { postId: { type: "string", format: "uuid" } },
+        },
+      },
+    },
+    adminGetReportedPost
+  );
+  fastify.post(
+    "/reports/posts/:postId/action",
+    {
+      schema: {
+        params: {
+          type: "object",
+          required: ["postId"],
+          properties: { postId: { type: "string", format: "uuid" } },
+        },
+        body: {
+          type: "object",
+          required: ["action"],
+          properties: {
+            action: { type: "string", enum: ["remove", "dismiss"] },
+            // Shown verbatim to the author when the post is removed — write it
+            // as something a person should read.
+            reason: { type: "string", maxLength: 500 },
+          },
+        },
+      },
+    },
+    adminModerateReportedPost
+  );
 
   // ---- On The Docket (event promotions) ----
   fastify.get(

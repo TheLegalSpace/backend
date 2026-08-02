@@ -62,7 +62,13 @@ export const startConversationExpiryJob = () => {
           await dispatchNotification({
             recipientAccountId: recipient,
             type: "chat_expiring",
-            payload: { conversationId: c.id, expiresAt },
+            payload: {
+              conversationId: c.id,
+              expiresAt,
+              // The other participant — "your conversation with X".
+              actorAccountId:
+                recipient === c.userAccountId ? c.lawyerAccountId : c.userAccountId,
+            },
           });
         }
         await prisma.conversation.update({

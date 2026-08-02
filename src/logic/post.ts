@@ -2,7 +2,8 @@ import { response, badRequest } from "../helpers/utility";
 import { Response } from "../interface";
 import {
   createPost,
-  findPostById,
+  findVisiblePostById,
+  moderationStatusFor,
   softDeletePost,
   upsertReaction,
   removeReaction,
@@ -12,6 +13,7 @@ import { prisma } from "../config/database";
 import { maskAccount } from "../services/anonymity";
 import { dispatchNotification } from "../services/notification";
 import { uploadToR2, MAX_ARTICLE_ASSET_BYTES } from "../services/storage";
+import { closeReportsForDeletedPost } from "../dao/postReport";
 
 const PDF_MIME = "application/pdf";
 const TITLE_MAX = 200;
@@ -25,7 +27,11 @@ const normalizeTitle = (title?: string | null): string | null => {
   return trimmed;
 };
 
-const notifyFollowersOfArticle = async (authorAccountId: string, postId: string) => {
+const notifyFollowersOfArticle = async (
+  authorAccountId: string,
+  postId: string,
+  postTitle: string | null
+) => {
   const followers = await prisma.follow.findMany({
     where: { followedAccountId: authorAccountId },
     select: { followerAccountId: true },
@@ -34,7 +40,7 @@ const notifyFollowersOfArticle = async (authorAccountId: string, postId: string)
     await dispatchNotification({
       recipientAccountId: f.followerAccountId,
       type: "article_published",
-      payload: { postId },
+      payload: { postId, actorAccountId: authorAccountId, postTitle },
     });
   }
 };
@@ -89,13 +95,13 @@ export const _createArticlePost = async (
     pdfSizeBytes: input.pdfBuffer.byteLength,
   });
 
-  await notifyFollowersOfArticle(authorAccountId, post.id);
+  await notifyFollowersOfArticle(authorAccountId, post.id, post.title ?? null);
 
   return response({ error: false, message: "Article post created", data: post });
 };
 
 export const _getPost = async (id: string, viewerId: string): Promise<Response> => {
-  const post = await findPostById(id);
+  const post = await findVisiblePostById(id, viewerId);
   if (!post) throw notFound("Post not found");
   return response({
     error: false,
@@ -103,12 +109,15 @@ export const _getPost = async (id: string, viewerId: string): Promise<Response> 
     data: {
       ...post,
       author: maskAccount(post.author as any, viewerId),
+      moderationStatus: moderationStatusFor(post, viewerId),
     },
   });
 };
 
 export const _deletePost = async (id: string): Promise<Response> => {
   await softDeletePost(id);
+  // Nothing left to moderate — clear it out of the admin queue.
+  await closeReportsForDeletedPost(id);
   return response({ error: false, message: "Post deleted" });
 };
 
@@ -117,14 +126,19 @@ export const _reactToPost = async (
   accountId: string,
   type: "like" | "dislike"
 ): Promise<Response> => {
-  const post = await findPostById(postId);
+  const post = await findVisiblePostById(postId, accountId);
   if (!post) throw notFound("Post not found");
   const { reaction, changed } = await upsertReaction(postId, accountId, type);
   if (changed && type === "like" && post.authorAccountId !== accountId) {
     await dispatchNotification({
       recipientAccountId: post.authorAccountId,
       type: "post_liked",
-      payload: { postId, accountId },
+      payload: {
+        postId,
+        accountId,
+        actorAccountId: accountId,
+        postTitle: post.title ?? null,
+      },
       emailable: false,
     });
   }

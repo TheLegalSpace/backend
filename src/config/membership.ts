@@ -6,11 +6,27 @@ export const PLAN_CODES = {
   community: "community",
   professionalLawyer: "professional_lawyer",
   professionalFirm: "professional_firm",
+  professionalLawyerAnnual: "professional_lawyer_annual",
+  professionalFirmAnnual: "professional_firm_annual",
 } as const;
 
 export const LAWYER_PRICE_KOBO = 3_500_000; // ₦35,000 / 6 months
 export const FIRM_PRICE_KOBO = 5_000_000; // ₦50,000 / 6 months
-export const INTERVAL_MONTHS = 6;
+
+// Billing terms a member can choose at checkout. Each term is its own Plan row
+// (and its own Paystack plan) because Paystack fixes the interval on the plan —
+// one plan cannot bill both biannually and annually.
+export const INTERVAL_MONTHS = 6; // default term
+export const ANNUAL_INTERVAL_MONTHS = 12;
+export const BILLING_INTERVALS = [INTERVAL_MONTHS, ANNUAL_INTERVAL_MONTHS] as const;
+export type BillingIntervalMonths = (typeof BILLING_INTERVALS)[number];
+
+// Annual is simply two terms up front — no discount today. Changing this single
+// number is all a "2 months free on annual" promo would take.
+export const ANNUAL_PRICE_MULTIPLIER = 2;
+
+export const isBillingInterval = (months: unknown): months is BillingIntervalMonths =>
+  BILLING_INTERVALS.includes(months as BillingIntervalMonths);
 
 export const INVOICE_PREFIX = "INV";
 
@@ -23,9 +39,24 @@ const COMMUNITY_FEATURES = [
   "TLS Services",
 ];
 
-const PROFESSIONAL_EXTRA_FEATURES = [
+// How many practice areas a Professional member may list. A firm fields a whole
+// bench of lawyers across specialisms, so it gets a wider allowance than a solo
+// practitioner. Community accounts (either role) keep a single primary area.
+export const PROFESSIONAL_PRACTICE_AREA_LIMITS: Record<string, number> = {
+  LAWYER: 2,
+  FIRM: 7,
+};
+export const COMMUNITY_PRACTICE_AREA_LIMIT = 1;
+
+export const professionalPracticeAreaLimit = (role: string): number =>
+  PROFESSIONAL_PRACTICE_AREA_LIMITS[role] ?? PROFESSIONAL_PRACTICE_AREA_LIMITS.LAWYER;
+
+// The plan-comparison card bullets. The practice-area line is generated from the
+// same limit the API enforces, so the card can never promise a number that
+// `PATCH /profile/me/practice-areas` then rejects.
+const professionalFeatures = (role: "LAWYER" | "FIRM"): string[] => [
   "Everything in Community Membership",
-  "Set up to 3 Practice Areas",
+  `Set up to ${professionalPracticeAreaLimit(role)} Practice Areas`,
   "Access to Client Leads",
   "Direct Messaging",
   "TLS Research",
@@ -47,6 +78,9 @@ export interface PlanSeed {
   features: string[];
 }
 
+const lawyerFeatures = professionalFeatures("LAWYER");
+const firmFeatures = [...professionalFeatures("FIRM"), ...FIRM_ONLY_FEATURES];
+
 export const PLAN_SEEDS: PlanSeed[] = [
   {
     code: PLAN_CODES.community,
@@ -59,35 +93,61 @@ export const PLAN_SEEDS: PlanSeed[] = [
   },
   {
     code: PLAN_CODES.professionalLawyer,
-    name: "Professional Membership",
+    name: "Professional Membership (6 months)",
     tier: "professional",
     forRole: "LAWYER",
     priceKobo: LAWYER_PRICE_KOBO,
     intervalMonths: INTERVAL_MONTHS,
-    features: PROFESSIONAL_EXTRA_FEATURES,
+    features: lawyerFeatures,
+  },
+  {
+    code: PLAN_CODES.professionalLawyerAnnual,
+    name: "Professional Membership (1 year)",
+    tier: "professional",
+    forRole: "LAWYER",
+    priceKobo: LAWYER_PRICE_KOBO * ANNUAL_PRICE_MULTIPLIER,
+    intervalMonths: ANNUAL_INTERVAL_MONTHS,
+    features: lawyerFeatures,
   },
   {
     code: PLAN_CODES.professionalFirm,
-    name: "Professional Membership",
+    name: "Professional Membership (6 months)",
     tier: "professional",
     forRole: "FIRM",
     priceKobo: FIRM_PRICE_KOBO,
     intervalMonths: INTERVAL_MONTHS,
-    features: [...PROFESSIONAL_EXTRA_FEATURES, ...FIRM_ONLY_FEATURES],
+    features: firmFeatures,
+  },
+  {
+    code: PLAN_CODES.professionalFirmAnnual,
+    name: "Professional Membership (1 year)",
+    tier: "professional",
+    forRole: "FIRM",
+    priceKobo: FIRM_PRICE_KOBO * ANNUAL_PRICE_MULTIPLIER,
+    intervalMonths: ANNUAL_INTERVAL_MONTHS,
+    features: firmFeatures,
   },
 ];
 
-// The professional plan code for a given role.
-export const professionalPlanCodeForRole = (role: string): string | null => {
-  if (role === "LAWYER") return PLAN_CODES.professionalLawyer;
-  if (role === "FIRM") return PLAN_CODES.professionalFirm;
+// The professional plan code for a role and billing term. Defaults to the
+// 6-month term so existing callers keep the behaviour they had.
+export const professionalPlanCodeForRole = (
+  role: string,
+  intervalMonths: number = INTERVAL_MONTHS
+): string | null => {
+  const annual = intervalMonths === ANNUAL_INTERVAL_MONTHS;
+  if (role === "LAWYER") {
+    return annual ? PLAN_CODES.professionalLawyerAnnual : PLAN_CODES.professionalLawyer;
+  }
+  if (role === "FIRM") {
+    return annual ? PLAN_CODES.professionalFirmAnnual : PLAN_CODES.professionalFirm;
+  }
   return null;
 };
 
-// Maximum practice areas a professional lawyer/firm may set ("Set up to 3 Practice Areas").
-export const PROFESSIONAL_PRACTICE_AREA_LIMIT = 3;
-// Community accounts can still list a single primary area.
-export const COMMUNITY_PRACTICE_AREA_LIMIT = 1;
-
-export const practiceAreaLimitForTier = (tier: string): number =>
-  tier === "professional" ? PROFESSIONAL_PRACTICE_AREA_LIMIT : COMMUNITY_PRACTICE_AREA_LIMIT;
+// The limit that applies to a given account: role decides the professional
+// allowance (lawyer 2 / firm 7), tier decides whether they get it at all.
+export const practiceAreaLimitFor = (tier: string, role: string): number =>
+  tier === "professional"
+    ? professionalPracticeAreaLimit(role)
+    : COMMUNITY_PRACTICE_AREA_LIMIT;

@@ -22,11 +22,12 @@ import {
   applyFeeRangeRollupTx,
 } from "../dao/profile";
 import { maskAccount } from "../services/anonymity";
+import { visiblePostWhere, moderationStatusFor } from "../dao/post";
 import { invalidateAccountCache } from "../middleware/auth";
 import { paginate, buildPagination } from "../helpers/pagination";
 import {
-  practiceAreaLimitForTier,
-  PROFESSIONAL_PRACTICE_AREA_LIMIT,
+  practiceAreaLimitFor,
+  professionalPracticeAreaLimit,
 } from "../config/membership";
 import {
   uploadToR2,
@@ -67,7 +68,15 @@ export const _getMe = async (accountId: string): Promise<Response> => {
   return response({
     error: false,
     message: "Profile retrieved",
-    data: { ...profile, unreadMessageCount, pendingLeadCount },
+    data: {
+      ...profile,
+      unreadMessageCount,
+      pendingLeadCount,
+      // How many practice areas this account may list (lawyer 2 / firm 7 on
+      // Professional, 1 on Community). Exposed so the setup wizard caps the
+      // picker at the same number the API enforces instead of hardcoding it.
+      practiceAreaLimit: practiceAreaLimitFor(account.membershipTier, account.role),
+    },
   });
 };
 
@@ -112,17 +121,29 @@ export const _toggleAnonymous = async (
   return response({ error: false, message: "Anonymity updated", data: account });
 };
 
-// "Set up to 3 Practice Areas" is a Professional perk; community accounts are capped lower.
-const assertPracticeAreaLimit = (tier: string, ids: string[]) => {
-  const limit = practiceAreaLimitForTier(tier);
-  if (new Set(ids).size > limit) {
-    throw badRequest(
-      limit < PROFESSIONAL_PRACTICE_AREA_LIMIT
-        ? `Your Community membership allows ${limit} practice area. Upgrade to Professional to set up to ${PROFESSIONAL_PRACTICE_AREA_LIMIT}.`
-        : `You can set up to ${PROFESSIONAL_PRACTICE_AREA_LIMIT} practice areas.`
-    );
-  }
+// Multiple practice areas are a Professional perk, and the allowance depends on
+// the account type — a firm covers more ground than a solo lawyer (lawyer 2,
+// firm 7). Community accounts of either type get one primary area.
+const assertPracticeAreaLimit = (tier: string, role: string, ids: string[]) => {
+  const limit = practiceAreaLimitFor(tier, role);
+  const count = new Set(ids).size;
+  if (count <= limit) return;
+
+  const professionalLimit = professionalPracticeAreaLimit(role);
+  throw badRequest(
+    tier === "professional"
+      ? `Your Professional membership allows up to ${professionalLimit} practice ${plural(
+          professionalLimit,
+          "area"
+        )}. You selected ${count}.`
+      : `Your Community membership allows ${limit} practice ${plural(
+          limit,
+          "area"
+        )}. Upgrade to Professional to set up to ${professionalLimit}.`
+  );
 };
+
+const plural = (n: number, word: string) => (n === 1 ? word : `${word}s`);
 
 export const _updatePracticeAreas = async (
   accountId: string,
@@ -135,8 +156,8 @@ export const _updatePracticeAreas = async (
   if (!account) throw notFound("Account not found");
 
   const practiceAreaIds = practiceAreas.map((a) => a.practiceAreaId);
-  assertPracticeAreaLimit(account.membershipTier, practiceAreaIds);
-  validatePracticeAreaFees(practiceAreas);
+  assertPracticeAreaLimit(account.membershipTier, account.role, practiceAreaIds);
+  const normalizedAreas = normalizePracticeAreaFees(practiceAreas);
 
   const validAreas = await prisma.practiceArea.findMany({
     where: { id: { in: practiceAreaIds }, isActive: true },
@@ -149,7 +170,7 @@ export const _updatePracticeAreas = async (
   await prisma.$transaction(async (tx) => {
     await tx.accountPracticeArea.deleteMany({ where: { accountId } });
     await tx.accountPracticeArea.createMany({
-      data: practiceAreas.map((a) => ({
+      data: normalizedAreas.map((a) => ({
         accountId,
         practiceAreaId: a.practiceAreaId,
         feeMin: a.minFee,
@@ -244,15 +265,24 @@ export const _getConnections = async (
 
 export const _getProfileArticles = async (
   targetId: string,
+  viewerId: string,
   page: number,
   limit: number
 ): Promise<Response> => {
   const { skip, take, page: p, limit: l } = paginate(page, limit);
-  const where = { authorAccountId: targetId, deletedAt: null, pdfUrl: { not: null } };
-  const [items, total] = await Promise.all([
+  const where = {
+    authorAccountId: targetId,
+    pdfUrl: { not: null },
+    ...visiblePostWhere(viewerId),
+  };
+  const [rows, total] = await Promise.all([
     prisma.post.findMany({ where, orderBy: { createdAt: "desc" }, skip, take }),
     prisma.post.count({ where }),
   ]);
+  const items = rows.map((p) => ({
+    ...p,
+    moderationStatus: moderationStatusFor(p, viewerId),
+  }));
   return response({
     error: false,
     message: "Articles retrieved",
@@ -296,7 +326,7 @@ export const _getProfilePosts = async (
   limit: number
 ): Promise<Response> => {
   const { skip, take, page: p, limit: l } = paginate(page, limit);
-  const where = { authorAccountId: targetId, deletedAt: null };
+  const where = { authorAccountId: targetId, ...visiblePostWhere(viewerId) };
   const [rows, total] = await Promise.all([
     prisma.post.findMany({
       where,
@@ -310,6 +340,7 @@ export const _getProfilePosts = async (
   const items = rows.map((p) => ({
     ...p,
     author: maskAccount(p.author as any, viewerId),
+    moderationStatus: moderationStatusFor(p, viewerId),
   }));
   return response({
     error: false,
@@ -320,28 +351,62 @@ export const _getProfilePosts = async (
 
 interface PracticeAreaFeeInput {
   practiceAreaId: string;
+  minFee?: number | null;
+  maxFee?: number | null;
+}
+
+interface PracticeAreaFee {
+  practiceAreaId: string;
   minFee: number;
   maxFee: number;
 }
 
-const validatePracticeAreaFees = (areas: PracticeAreaFeeInput[]) => {
+/**
+ * Fees are per-area but only *one* of them has to be filled in.
+ *
+ * Making every area mandatory meant a firm with seven specialisms had to price
+ * all seven before it could finish signing up — people abandoned the wizard
+ * there. One stated fee is enough to drive the matchmaking budget filter; the
+ * rest can be left blank (stored as 0 = "not stated") and priced later from the
+ * profile. Giving only one side of a range is read as a single flat fee.
+ */
+const normalizePracticeAreaFees = (areas: PracticeAreaFeeInput[]): PracticeAreaFee[] => {
   const seen = new Set<string>();
+  const normalized: PracticeAreaFee[] = [];
+
   for (const a of areas) {
     if (seen.has(a.practiceAreaId)) {
       throw badRequest("Duplicate practice area in the list");
     }
     seen.add(a.practiceAreaId);
-    if (a.minFee > a.maxFee) {
+
+    let minFee = Math.max(0, Math.trunc(a.minFee ?? 0));
+    let maxFee = Math.max(0, Math.trunc(a.maxFee ?? 0));
+    if (minFee > 0 && maxFee === 0) maxFee = minFee;
+    if (maxFee > 0 && minFee === 0) minFee = maxFee;
+    if (minFee > maxFee) {
       throw badRequest("Minimum fee cannot be greater than maximum fee");
     }
+    normalized.push({ practiceAreaId: a.practiceAreaId, minFee, maxFee });
   }
+
+  if (!normalized.some((a) => a.maxFee > 0)) {
+    throw badRequest(
+      "Add a fee for at least one practice area so clients can be matched to your budget range"
+    );
+  }
+  return normalized;
 };
 
-// Account-wide rollup from the per-area ranges (coarse budget filter + summary badge).
-const rollupFeeRange = (areas: PracticeAreaFeeInput[]) => ({
-  feeRangeMin: Math.min(...areas.map((a) => a.minFee)),
-  feeRangeMax: Math.max(...areas.map((a) => a.maxFee)),
-});
+// Account-wide rollup from the per-area ranges (coarse budget filter + summary
+// badge). Unpriced areas are skipped so a blank one can't zero out the minimum.
+const rollupFeeRange = (areas: PracticeAreaFee[]) => {
+  const priced = areas.filter((a) => a.maxFee > 0);
+  return {
+    feeRangeMin: Math.min(...priced.map((a) => a.minFee)),
+    feeRangeMax: Math.max(...priced.map((a) => a.maxFee)),
+  };
+};
 
 interface LawyerSetupInput {
   firstName: string;
@@ -415,8 +480,10 @@ export const _setupLawyer = async (
   if (account.lawyerProfile) throw conflict("Lawyer profile already exists");
 
   const practiceAreaIds = body.practiceAreas.map((a) => a.practiceAreaId);
-  assertPracticeAreaLimit(account.membershipTier, practiceAreaIds);
-  validatePracticeAreaFees(body.practiceAreas);
+  // The account is still PENDING_PROFESSIONAL here — the limit that matters is
+  // the one for the role being set up, not the placeholder role on the row.
+  assertPracticeAreaLimit(account.membershipTier, "LAWYER", practiceAreaIds);
+  const normalizedAreas = normalizePracticeAreaFees(body.practiceAreas);
 
   const validAreas = await prisma.practiceArea.findMany({
     where: { id: { in: practiceAreaIds }, isActive: true },
@@ -426,7 +493,7 @@ export const _setupLawyer = async (
     throw badRequest("One or more practice areas are invalid or inactive");
   }
 
-  const { feeRangeMin, feeRangeMax } = rollupFeeRange(body.practiceAreas);
+  const { feeRangeMin, feeRangeMax } = rollupFeeRange(normalizedAreas);
   const fullName = `${body.firstName.trim()} ${body.lastName.trim()}`.trim();
 
   const result = await prisma.$transaction(async (tx) => {
@@ -452,7 +519,7 @@ export const _setupLawyer = async (
       },
     });
     await tx.accountPracticeArea.createMany({
-      data: body.practiceAreas.map((a) => ({
+      data: normalizedAreas.map((a) => ({
         accountId,
         practiceAreaId: a.practiceAreaId,
         feeMin: a.minFee,
@@ -506,8 +573,8 @@ export const _setupFirm = async (
   if (account.firmProfile) throw conflict("Firm profile already exists");
 
   const practiceAreaIds = body.practiceAreas.map((a) => a.practiceAreaId);
-  assertPracticeAreaLimit(account.membershipTier, practiceAreaIds);
-  validatePracticeAreaFees(body.practiceAreas);
+  assertPracticeAreaLimit(account.membershipTier, "FIRM", practiceAreaIds);
+  const normalizedAreas = normalizePracticeAreaFees(body.practiceAreas);
 
   const validAreas = await prisma.practiceArea.findMany({
     where: { id: { in: practiceAreaIds }, isActive: true },
@@ -517,7 +584,7 @@ export const _setupFirm = async (
     throw badRequest("One or more practice areas are invalid or inactive");
   }
 
-  const { feeRangeMin, feeRangeMax } = rollupFeeRange(body.practiceAreas);
+  const { feeRangeMin, feeRangeMax } = rollupFeeRange(normalizedAreas);
 
   const result = await prisma.$transaction(async (tx) => {
     await tx.account.update({
@@ -542,7 +609,7 @@ export const _setupFirm = async (
       },
     });
     await tx.accountPracticeArea.createMany({
-      data: body.practiceAreas.map((a) => ({
+      data: normalizedAreas.map((a) => ({
         accountId,
         practiceAreaId: a.practiceAreaId,
         feeMin: a.minFee,

@@ -13,6 +13,7 @@ import {
   downloadInvoice,
 } from "../controller/membership";
 import {
+  subscribeBodySchema,
   verifyQuerySchema,
   autoRenewBodySchema,
   invoicesQuerySchema,
@@ -25,7 +26,7 @@ export default async function membershipRoutes(fastify: FastifyInstance) {
 
   fastify.get("/", getMembership);
   fastify.get("/plans", getPlans);
-  fastify.post("/subscribe", subscribe);
+  fastify.post("/subscribe", { schema: subscribeBodySchema }, subscribe);
   fastify.get("/verify", { schema: verifyQuerySchema }, verifyPayment);
   fastify.patch("/auto-renew", { schema: autoRenewBodySchema }, setAutoRenew);
   fastify.post("/cancel", cancelRenewal);

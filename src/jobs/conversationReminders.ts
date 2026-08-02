@@ -55,7 +55,12 @@ export const startConversationReminderJob = () => {
         await dispatchNotification({
           recipientAccountId: recipientId,
           type: "reply_reminder",
-          payload: { conversationId: c.id, messageId: latest.id },
+          payload: {
+            conversationId: c.id,
+            messageId: latest.id,
+            actorAccountId: latest.senderAccountId,
+            snippet: latest.body.slice(0, 80),
+          },
         });
         await prisma.conversation.update({
           where: { id: c.id },
@@ -73,7 +78,12 @@ export const startConversationReminderJob = () => {
         await dispatchNotification({
           recipientAccountId: c.lawyerAccountId,
           type: "unread_client_message",
-          payload: { conversationId: c.id, messageId: latest.id },
+          payload: {
+            conversationId: c.id,
+            messageId: latest.id,
+            actorAccountId: c.userAccountId,
+            snippet: latest.body.slice(0, 80),
+          },
           channels: ["in_app", "whatsapp"],
           whatsapp: {
             template: env.whatsappUnreadTemplate,

@@ -1,6 +1,7 @@
 import webpush from "web-push";
 import { env } from "../config/env";
 import { NotificationType } from "../interface";
+import { presentNotification } from "./notificationPresenter";
 import {
   listPushSubscriptionsByAccount,
   deletePushSubscriptionById,
@@ -34,121 +35,19 @@ export interface WebPushPayload {
 
 /**
  * Map a stored Notification to a human push payload (title + body + click URL).
- * Falls back to a generic message for types not explicitly handled so no
- * notification ever ships without readable text.
+ * The copy itself lives in `notificationPresenter` so the push text and the
+ * in-app bell list can never drift apart.
  */
 export const buildPushPayload = (notif: {
   type: NotificationType | string;
   payload: any;
   id?: string;
 }): WebPushPayload => {
-  const p = (notif.payload || {}) as Record<string, any>;
-  const base = env.frontendUrl.replace(/\/$/, "");
-  let title = "The Legal Space";
-  let body = "You have a new notification";
-  let path = "/notifications";
-
-  switch (notif.type) {
-    case "new_request":
-      title = "New lead";
-      body = `${p.userMaskedName || "A client"} sent you a request${
-        p.matter ? ` — ${p.matter}` : ""
-      }`;
-      path = p.requestId ? `/leads/${p.requestId}` : "/leads";
-      break;
-    case "request_accepted":
-      title = "Request accepted";
-      body = `${p.lawyerName || "Your lawyer"} accepted your request`;
-      path = p.conversationId
-        ? `/conversations/${p.conversationId}`
-        : "/requests";
-      break;
-    case "request_declined":
-      title = "Request declined";
-      body = `${p.lawyerMaskedName || "The lawyer"} declined your request`;
-      path = "/requests";
-      break;
-    case "request_expiring":
-      title = "Request expiring soon";
-      body = "A pending request is about to expire";
-      path = "/requests";
-      break;
-    case "request_expired":
-      title = "Request expired";
-      body = "Your request expired without a response";
-      path = "/requests";
-      break;
-    case "new_message":
-    case "reply_reminder":
-    case "unread_client_message":
-      title = "New message";
-      body = `${p.senderMaskedName || "Someone"}: ${
-        p.snippet || "sent you a message"
-      }`;
-      path = p.conversationId
-        ? `/conversations/${p.conversationId}`
-        : "/conversations";
-      break;
-    case "chat_expiring":
-      title = "Conversation expiring";
-      body = "A conversation will be archived soon due to inactivity";
-      path = p.conversationId
-        ? `/conversations/${p.conversationId}`
-        : "/conversations";
-      break;
-    case "review_request":
-      title = "Leave a review";
-      body = `How was your experience with ${p.otherPartyName || "your contact"}?`;
-      path = p.conversationId
-        ? `/conversations/${p.conversationId}`
-        : "/conversations";
-      break;
-    case "new_review":
-      title = "New review";
-      body = `You received a ${p.rating ? `${p.rating}-star ` : ""}review`;
-      path = "/profile/me";
-      break;
-    case "article_published":
-      title = "New article";
-      body = `${p.authorName || "Someone you follow"} published a new article`;
-      path = p.postId ? `/posts/${p.postId}` : "/feed";
-      break;
-    case "verification_update":
-      title = "Verification update";
-      body = "Your verification status has changed";
-      path = "/profile/me";
-      break;
-    case "service_request_received":
-      title = "Request received";
-      body = "We've received your service request";
-      path = "/services";
-      break;
-    case "subscription_activated":
-    case "subscription_renewed":
-    case "subscription_expiring_soon":
-    case "subscription_expired":
-    case "payment_failed":
-    case "payment_method_updated":
-      title = "Membership update";
-      body = (p.message as string) || "There's an update on your membership";
-      path = "/membership";
-      break;
-    case "system":
-      title = (p.title as string) || "The Legal Space";
-      body = (p.message as string) || "You have a new notification";
-      break;
-    default:
-      break;
-  }
-
+  const { title, body, url } = presentNotification(notif);
   return {
     title,
     body,
-    data: {
-      url: `${base}${path}`,
-      type: notif.type,
-      notificationId: notif.id,
-    },
+    data: { url, type: notif.type, notificationId: notif.id },
   };
 };
 

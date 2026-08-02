@@ -13,6 +13,7 @@ import {
 } from "../dao/research";
 import { runResearch, generateThreadTitle } from "../services/research";
 import { uploadToR2, MAX_ARTICLE_ASSET_BYTES } from "../services/storage";
+import { assertResearchCredit, spendResearchCredit } from "./credits";
 
 const PDF_MIME = "application/pdf";
 
@@ -39,7 +40,7 @@ export const _getThread = async (id: string, accountId: string): Promise<Respons
 
 export const _postMessage = async (
   threadId: string,
-  accountId: string,
+  account: any,
   input: {
     text: string;
     pdfBuffer?: Buffer | null;
@@ -47,12 +48,18 @@ export const _postMessage = async (
     pdfFilename?: string;
   }
 ): Promise<Response> => {
+  const accountId = account.id;
   const thread = await findThreadById(threadId);
   assertOwner(thread, accountId);
 
   const text = (input.text || "").trim();
   if (!text) throw badRequest("Message text is required");
   if (text.length > 5000) throw badRequest("Message exceeds 5000 characters");
+
+  // Meter usage: grant this month's included allowance if due, then require a
+  // credit before running the (paid) grounded call. Throws 402 if the wallet is
+  // empty. The credit is only *spent* below, after a confident answer.
+  await assertResearchCredit(account);
 
   // Optional PDF upload + validation (mirrors article-post handling).
   let attachment: ResearchAttachment | null = null;
@@ -120,6 +127,16 @@ export const _postMessage = async (
     confident: result.confident,
   });
 
+  // Spend one credit only for a substantive answer. Refusals (and the 503 paths,
+  // which throw before here) are free — the user keeps the credit.
+  let creditsRemaining: number | null = null;
+  if (result.confident) {
+    creditsRemaining = await spendResearchCredit(account, {
+      messageId: assistantMessage.id,
+      threadId,
+    });
+  }
+
   // Title the thread from the first user message; otherwise just touch it.
   if (isFirstMessage) {
     const title = await generateThreadTitle(text);
@@ -131,7 +148,12 @@ export const _postMessage = async (
   return response({
     error: false,
     message: "Research response generated",
-    data: { ...assistantMessage, grounded: result.grounded, widened: Boolean(result.widened) },
+    data: {
+      ...assistantMessage,
+      grounded: result.grounded,
+      widened: Boolean(result.widened),
+      creditsRemaining,
+    },
   });
 };
 

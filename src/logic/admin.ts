@@ -21,6 +21,7 @@ import {
   promotionStats,
 } from "../dao/service";
 import { listEventsAdmin } from "../dao/event";
+import { closeReportsForDeletedPost } from "../dao/postReport";
 import { listAllPlans, getPlanById, updatePlan } from "../dao/membership";
 import { createPlan } from "../services/paystack";
 import { uploadToR2, MAX_AVATAR_BYTES } from "../services/storage";
@@ -130,6 +131,8 @@ export const _deletePost = async (adminId: string, postId: string): Promise<Resp
   const post = await prisma.post.findUnique({ where: { id: postId } });
   if (!post) throw notFound("Post not found");
   await prisma.post.update({ where: { id: postId }, data: { deletedAt: new Date() } });
+  // Force-deleting a post also settles any open reports against it.
+  await closeReportsForDeletedPost(postId, adminId);
   await recordAuditLog({
     adminAccountId: adminId,
     action: "post.delete",

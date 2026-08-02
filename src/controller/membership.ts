@@ -30,8 +30,11 @@ export const getPlans = async (req: FastifyRequest, reply: FastifyReply) => {
 
 export const subscribe = async (req: FastifyRequest, reply: FastifyReply) => {
   try {
-    const { context, callbackUrl } = (req.body as any) ?? {};
-    return responseOk(reply, await _subscribe(req.account, context, callbackUrl));
+    const { context, callbackUrl, intervalMonths, interval } = (req.body as any) ?? {};
+    // `interval` is the friendly alias the payment page sends ("annual"/"biannual").
+    const months =
+      intervalMonths ?? (interval === "annual" || interval === "yearly" ? 12 : undefined);
+    return responseOk(reply, await _subscribe(req.account, context, callbackUrl, months));
   } catch (e) {
     return responseBad(reply, e);
   }

@@ -4,6 +4,7 @@ import { response } from "../helpers/utility";
 import { Response } from "../interface";
 import { paginate, buildPagination } from "../helpers/pagination";
 import { maskAccount } from "../services/anonymity";
+import { visiblePostWhere, moderationStatusFor } from "../dao/post";
 import { env } from "../config/env";
 
 const TOP_LAWYERS_KEY = "topAccounts:LAWYER";
@@ -13,6 +14,7 @@ const SIDEBAR_CACHE_KEY = "feed:sidebar";
 const decoratePost = (p: any, viewerId: string) => ({
   ...p,
   author: maskAccount(p.author, viewerId),
+  moderationStatus: moderationStatusFor(p, viewerId),
 });
 
 export const _getFeedAll = async (
@@ -29,8 +31,8 @@ export const _getFeedAll = async (
   followedIds.push(viewerId);
 
   const where: any = followedIds.length > 1
-    ? { authorAccountId: { in: followedIds }, deletedAt: null }
-    : { deletedAt: null };
+    ? { authorAccountId: { in: followedIds }, ...visiblePostWhere(viewerId) }
+    : visiblePostWhere(viewerId);
 
   const [items, total] = await Promise.all([
     prisma.post.findMany({
@@ -87,7 +89,7 @@ export const _getFeedTopAccounts = async (
       data: { items: [], pagination: buildPagination(0, p, l) },
     });
   }
-  const where = { authorAccountId: { in: topIds }, deletedAt: null };
+  const where = { authorAccountId: { in: topIds }, ...visiblePostWhere(viewerId) };
   const [items, total] = await Promise.all([
     prisma.post.findMany({
       where,
@@ -114,7 +116,7 @@ export const _getFeedArticles = async (
   limit: number
 ): Promise<Response> => {
   const { skip, take, page: p, limit: l } = paginate(page, limit);
-  const where = { pdfUrl: { not: null }, deletedAt: null };
+  const where = { pdfUrl: { not: null }, ...visiblePostWhere(viewerId) };
   const [rows, total] = await Promise.all([
     prisma.post.findMany({
       where,
@@ -125,10 +127,7 @@ export const _getFeedArticles = async (
     }),
     prisma.post.count({ where }),
   ]);
-  const items = rows.map((p) => ({
-    ...p,
-    author: maskAccount(p.author as any, viewerId),
-  }));
+  const items = rows.map((p) => decoratePost(p, viewerId));
   return response({
     error: false,
     message: "Articles retrieved",

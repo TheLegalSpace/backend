@@ -25,7 +25,7 @@ export const _follow = async (
     await dispatchNotification({
       recipientAccountId: followedAccountId,
       type: "new_follower",
-      payload: { followerAccountId },
+      payload: { followerAccountId, actorAccountId: followerAccountId },
       emailable: false,
     });
   }

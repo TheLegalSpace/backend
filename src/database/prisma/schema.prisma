@@ -41,6 +41,8 @@ model Account {
   practiceAreaLinks AccountPracticeArea[]
   posts             Post[]
   postReactions     PostReaction[]
+  postReportsFiled    PostReport[]        @relation("ReportsFiled")
+  postReportsReviewed PostReport[]        @relation("ReportsReviewed")
   followsAsFollower Follow[]              @relation("Follower")
   followsAsFollowed Follow[]              @relation("Followed")
   outgoingRequests  Request[]             @relation("UserRequests")
@@ -67,6 +69,8 @@ model Account {
   supportTickets    SupportTicket[]
   surveyResponses   SurveyResponse[]
   announcements     Announcement[]
+  creditWallet       CreditWallet?
+  creditTransactions CreditTransaction[]
 
   @@index([role, status])
   @@index([role, status, locationCity])
@@ -157,16 +161,47 @@ model Post {
   pdfSizeBytes    Int?      @map("pdf_size_bytes")
   likeCount       Int       @default(0) @map("like_count")
   dislikeCount    Int       @default(0) @map("dislike_count")
+  // Moderation. `reportCount` counts *open* reports; `autoHiddenAt` is set when
+  // that count crosses the threshold — the post is withheld from everyone but
+  // its author and admins until an admin removes it or dismisses the reports.
+  reportCount     Int       @default(0) @map("report_count")
+  autoHiddenAt    DateTime? @map("auto_hidden_at")
   createdAt       DateTime  @default(now()) @map("created_at")
   updatedAt       DateTime  @updatedAt @map("updated_at")
   deletedAt       DateTime? @map("deleted_at")
 
   author    Account        @relation(fields: [authorAccountId], references: [id], onDelete: Cascade)
   reactions PostReaction[]
+  reports   PostReport[]
 
   @@index([authorAccountId])
   @@index([createdAt(sort: Desc)])
   @@map("posts")
+}
+
+// A user-submitted report against a Post. One row per (post, reporter) — the
+// unique constraint makes reporting idempotent. `status` tracks the moderation
+// lifecycle: pending -> actioned (post removed) | dismissed (no violation).
+model PostReport {
+  id                String    @id @default(uuid()) @db.Uuid
+  postId            String    @map("post_id") @db.Uuid
+  reporterAccountId String    @map("reporter_account_id") @db.Uuid
+  reason            String // spam | harassment | misinformation | inappropriate | impersonation | confidentiality | other
+  details           String?
+  status            String    @default("pending") // pending | actioned | dismissed
+  reviewedByAdminId String?   @map("reviewed_by_admin_id") @db.Uuid
+  reviewedAt        DateTime? @map("reviewed_at")
+  resolutionNote    String?   @map("resolution_note")
+  createdAt         DateTime  @default(now()) @map("created_at")
+
+  post            Post    @relation(fields: [postId], references: [id], onDelete: Cascade)
+  reporter        Account @relation("ReportsFiled", fields: [reporterAccountId], references: [id], onDelete: Cascade)
+  reviewedByAdmin Account? @relation("ReportsReviewed", fields: [reviewedByAdminId], references: [id])
+
+  @@unique([postId, reporterAccountId])
+  @@index([status, createdAt(sort: Desc)])
+  @@index([reporterAccountId])
+  @@map("post_reports")
 }
 
 model PostReaction {
@@ -505,6 +540,40 @@ model ResearchMessage {
 
   @@index([threadId, createdAt])
   @@map("research_messages")
+}
+
+// One credit wallet per account. Meters TLS Research usage (1 credit = 1 grounded
+// research question). Balance accumulates: monthly allowance grants + purchased
+// packs add; research answers spend. See docs/research-credits.md.
+model CreditWallet {
+  id                 String    @id @default(uuid()) @db.Uuid
+  accountId          String    @unique @map("account_id") @db.Uuid
+  balance            Int       @default(0)
+  lastMonthlyGrantAt DateTime? @map("last_monthly_grant_at")
+  createdAt          DateTime  @default(now()) @map("created_at")
+  updatedAt          DateTime  @updatedAt @map("updated_at")
+
+  account Account @relation(fields: [accountId], references: [id], onDelete: Cascade)
+
+  @@map("credit_wallets")
+}
+
+// Append-only ledger of every credit movement (transparency + audit).
+model CreditTransaction {
+  id           String   @id @default(uuid()) @db.Uuid
+  accountId    String   @map("account_id") @db.Uuid
+  type         String // grant | purchase | spend | refund | adjustment
+  amount       Int // signed: +grant/+purchase, -spend
+  balanceAfter Int      @map("balance_after")
+  reference    String? // paystack ref (purchase) or research message id (spend) — for idempotency
+  metadata     Json?
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  account Account @relation(fields: [accountId], references: [id], onDelete: Cascade)
+
+  @@index([accountId, createdAt(sort: Desc)])
+  @@index([reference])
+  @@map("credit_transactions")
 }
 
 model Plan {

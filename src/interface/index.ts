@@ -43,6 +43,10 @@ export type NotificationType =
   | "subscription_expired"
   | "payment_failed"
   | "payment_method_updated"
+  | "credits_purchased"
+  | "credits_low"
+  | "post_removed"
+  | "report_reviewed"
   | "system";
 
 export type IntakeBudget =
@@ -62,3 +66,4 @@ export interface IntakePayload {
 }
 
 export * from "./research";
+export * from "./moderation";

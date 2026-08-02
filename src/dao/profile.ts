@@ -14,8 +14,12 @@ export const applyFeeRangeRollupTx = async (
     where: { accountId },
     select: { feeMin: true, feeMax: true },
   });
-  const feeRangeMin = areas.length === 0 ? 0 : Math.min(...areas.map((a) => a.feeMin));
-  const feeRangeMax = areas.length === 0 ? 0 : Math.max(...areas.map((a) => a.feeMax));
+  // Areas the member left unpriced (0/0) are excluded from the rollup — otherwise
+  // one blank area would drag feeRangeMin to 0 and make the matchmaking budget
+  // filter match every client regardless of what they can afford.
+  const priced = areas.filter((a) => a.feeMin > 0 || a.feeMax > 0);
+  const feeRangeMin = priced.length === 0 ? 0 : Math.min(...priced.map((a) => a.feeMin));
+  const feeRangeMax = priced.length === 0 ? 0 : Math.max(...priced.map((a) => a.feeMax));
   if (role === "LAWYER") {
     await tx.lawyerProfile.update({
       where: { accountId },

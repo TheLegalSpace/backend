@@ -12,9 +12,44 @@ import {
   deletePushSubscriptionByEndpoint,
 } from "../dao/pushSubscription";
 import { paginate, buildPagination } from "../helpers/pagination";
+import { presentNotification } from "../services/notificationPresenter";
 
 const UNREAD_CACHE_KEY = (id: string) => `notif:unread:${id}`;
 const UNREAD_TTL = 2 * 60;
+
+/**
+ * The stored row is raw data (type + ids + names). The bell list needs something
+ * it can render directly, so every item is decorated with the same `title` /
+ * `body` / `url` the push notification uses, plus a flat `actor` block for the
+ * avatar+name row in the design. Rendering at read time (rather than freezing
+ * copy into the payload) means older rows pick up wording fixes too.
+ */
+const decorate = (n: {
+  id: string;
+  type: string;
+  payload: any;
+  readAt: Date | null;
+  createdAt: Date;
+}) => {
+  const { title, body, url, path } = presentNotification(n);
+  const p = (n.payload || {}) as Record<string, any>;
+  return {
+    ...n,
+    title,
+    body,
+    url,
+    path,
+    isRead: n.readAt !== null,
+    actor: p.actorAccountId
+      ? {
+          id: p.actorAccountId,
+          name: p.actorName ?? null,
+          avatarUrl: p.actorAvatarUrl ?? null,
+          role: p.actorRole ?? null,
+        }
+      : null,
+  };
+};
 
 export const _list = async (
   accountId: string,
@@ -26,7 +61,7 @@ export const _list = async (
   return response({
     error: false,
     message: "Notifications retrieved",
-    data: { items, pagination: buildPagination(total, p, l) },
+    data: { items: items.map(decorate), pagination: buildPagination(total, p, l) },
   });
 };
 

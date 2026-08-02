@@ -3,8 +3,10 @@ import { redis } from "../config/redis";
 import { createNotification } from "../dao/notification";
 import { emitToAccount } from "../realtime/emitter";
 import { NotificationType } from "../interface";
+import { maskAccount } from "./anonymity";
 import { sendWhatsAppTemplate } from "./whatsapp";
 import { sendPushToAccount, buildPushPayload } from "./webPush";
+import { presentNotification } from "./notificationPresenter";
 
 // Delivery transports. "in_app" is always sent (it backs the bell badge and is
 // the source of truth). Extra channels are best-effort side transports.
@@ -30,18 +32,71 @@ export interface DispatchNotificationInput {
   whatsapp?: { template: string; params?: string[] };
 }
 
+/**
+ * Resolve `payload.actorAccountId` into a display name/avatar so the stored row
+ * carries who it is about, not just an id. Anonymity is applied against the
+ * recipient (an anonymous client stays "Anonymous User" to the lawyer), matching
+ * the masking every other read path does.
+ *
+ * Callers that already resolved a name (or that have no actor) are untouched.
+ */
+const enrichPayload = async (
+  recipientAccountId: string,
+  payload: Record<string, any>
+): Promise<Record<string, any>> => {
+  const actorId = payload?.actorAccountId;
+  if (!actorId || payload.actorName) return payload;
+  try {
+    const actor = await prisma.account.findUnique({
+      where: { id: actorId },
+      select: {
+        id: true,
+        role: true,
+        fullName: true,
+        email: true,
+        avatarUrl: true,
+        isAnonymous: true,
+      },
+    });
+    if (!actor) return payload;
+    const masked = maskAccount(actor as any, recipientAccountId);
+    return {
+      ...payload,
+      actorName: masked.fullName,
+      // The avatar survives masking — an anonymous client shows their picture
+      // with the name "Anonymous User" (same as every other read path).
+      actorAvatarUrl: actor.avatarUrl,
+      actorRole: actor.role,
+    };
+  } catch (err: any) {
+    console.error("[notification] actor enrichment failed:", err?.message);
+    return payload;
+  }
+};
+
 export const dispatchNotification = async (data: DispatchNotificationInput) => {
   console.log(
     `[notification] dispatching type=${data.type} recipient=${data.recipientAccountId}`
   );
   try {
+    const payload = await enrichPayload(data.recipientAccountId, data.payload || {});
     const notif = await createNotification({
       recipientAccountId: data.recipientAccountId,
       type: data.type,
-      payload: data.payload,
+      payload,
     });
     console.log(`[notification] inserted id=${notif.id} type=${data.type}`);
-    emitToAccount(data.recipientAccountId, "notification", notif);
+    // Live payload mirrors GET /notifications — same rendered title/body/url, so
+    // a socket-delivered notification and a refetched one look identical.
+    const presented = presentNotification(notif);
+    emitToAccount(data.recipientAccountId, "notification", {
+      ...notif,
+      title: presented.title,
+      body: presented.body,
+      url: presented.url,
+      path: presented.path,
+      isRead: false,
+    });
     await redis.del(`notif:unread:${data.recipientAccountId}`).catch(() => null);
 
     // Best-effort Web Push for the closed-app case. Default-on unless the type
