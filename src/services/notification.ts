@@ -6,7 +6,7 @@ import { NotificationType } from "../interface";
 import { maskAccount } from "./anonymity";
 import { sendWhatsAppTemplate } from "./whatsapp";
 import { sendPushToAccount, buildPushPayload } from "./webPush";
-import { presentNotification } from "./notificationPresenter";
+import { decorateNotification } from "./notificationPresenter";
 
 // Delivery transports. "in_app" is always sent (it backs the bell badge and is
 // the source of truth). Extra channels are best-effort side transports.
@@ -86,17 +86,9 @@ export const dispatchNotification = async (data: DispatchNotificationInput) => {
       payload,
     });
     console.log(`[notification] inserted id=${notif.id} type=${data.type}`);
-    // Live payload mirrors GET /notifications — same rendered title/body/url, so
-    // a socket-delivered notification and a refetched one look identical.
-    const presented = presentNotification(notif);
-    emitToAccount(data.recipientAccountId, "notification", {
-      ...notif,
-      title: presented.title,
-      body: presented.body,
-      url: presented.url,
-      path: presented.path,
-      isRead: false,
-    });
+    // Live payload is the exact object GET /notifications returns, so a
+    // socket-delivered notification and a refetched one are interchangeable.
+    emitToAccount(data.recipientAccountId, "notification", decorateNotification(notif));
     await redis.del(`notif:unread:${data.recipientAccountId}`).catch(() => null);
 
     // Best-effort Web Push for the closed-app case. Default-on unless the type

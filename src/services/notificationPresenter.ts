@@ -268,6 +268,42 @@ export const presentNotification = (notif: {
   return { title, body, path, url: `${base}${path}` };
 };
 
+/**
+ * The render-ready notification the clients actually consume — the stored row
+ * plus rendered copy, a deep link and a flat actor block.
+ *
+ * `GET /notifications`, the Socket.IO `notification` event and Web Push all go
+ * through this, so a live-delivered notification and a refetched one are the
+ * same object.
+ */
+export const decorateNotification = (n: {
+  id?: string;
+  type: string;
+  payload?: any;
+  readAt?: Date | null;
+  createdAt?: Date;
+  [key: string]: any;
+}) => {
+  const { title, body, url, path } = presentNotification(n);
+  const p = (n.payload || {}) as Record<string, any>;
+  return {
+    ...n,
+    title,
+    body,
+    url,
+    path,
+    isRead: n.readAt != null,
+    actor: p.actorAccountId
+      ? {
+          id: p.actorAccountId,
+          name: p.actorName ?? null,
+          avatarUrl: p.actorAvatarUrl ?? null,
+          role: p.actorRole ?? null,
+        }
+      : null,
+  };
+};
+
 // "event_promotion" -> "event promotion", "under_review" -> "under review".
 const humanize = (value?: string | null): string =>
   typeof value === "string" ? value.replace(/_/g, " ").trim() : "";
