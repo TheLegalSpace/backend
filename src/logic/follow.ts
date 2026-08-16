@@ -9,6 +9,7 @@ import {
 import { findAccountById } from "../dao/account";
 import { paginate, buildPagination } from "../helpers/pagination";
 import { maskAccount } from "../services/anonymity";
+import { applyFeeVisibility } from "../services/feeVisibility";
 import { dispatchNotification } from "../services/notification";
 
 export const _follow = async (
@@ -48,7 +49,9 @@ export const _listFollowing = async (
 ): Promise<Response> => {
   const { skip, take, page: p, limit: l } = paginate(page, limit);
   const { rows, total } = await listFollowing(accountId, skip, take);
-  const items = rows.map((r) => maskAccount(r.followed as any, viewerId));
+  const items = rows.map((r) =>
+    applyFeeVisibility(maskAccount(r.followed as any, viewerId), viewerId)
+  );
   return response({
     error: false,
     message: "Following retrieved",
@@ -64,7 +67,9 @@ export const _listFollowers = async (
 ): Promise<Response> => {
   const { skip, take, page: p, limit: l } = paginate(page, limit);
   const { rows, total } = await listFollowers(accountId, skip, take);
-  const items = rows.map((r) => maskAccount(r.follower as any, viewerId));
+  const items = rows.map((r) =>
+    applyFeeVisibility(maskAccount(r.follower as any, viewerId), viewerId)
+  );
   return response({
     error: false,
     message: "Followers retrieved",

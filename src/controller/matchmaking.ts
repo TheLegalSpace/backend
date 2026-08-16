@@ -5,6 +5,7 @@ import {
   _getIntake,
   _restartIntake,
   _searchByText,
+  _matchAvailability,
 } from "../logic/matchmaking";
 import { responseOk, responseBad } from "../helpers/utility";
 import { ExtractionInsufficientError } from "../services/llm";
@@ -14,6 +15,15 @@ export const search = async (req: FastifyRequest, reply: FastifyReply) => {
     const intake = req.body as any;
     const { page, limit } = req.query as any;
     return responseOk(reply, await _searchMatches(intake, req.account.id, page, limit));
+  } catch (e) {
+    return responseBad(reply, e);
+  }
+};
+
+export const availability = async (req: FastifyRequest, reply: FastifyReply) => {
+  try {
+    const { practiceAreaId } = req.query as { practiceAreaId: string };
+    return responseOk(reply, await _matchAvailability(req.account.id, practiceAreaId));
   } catch (e) {
     return responseBad(reply, e);
   }

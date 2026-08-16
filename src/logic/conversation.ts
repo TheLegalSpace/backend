@@ -29,6 +29,7 @@ import {
 import { findPracticeAreasByIds } from "../dao/practiceArea";
 import { paginate, buildPagination } from "../helpers/pagination";
 import { maskAccount } from "../services/anonymity";
+import { applyFeeVisibility } from "../services/feeVisibility";
 import { dispatchNotification } from "../services/notification";
 import { emitToConversation, emitToAccount } from "../realtime/emitter";
 
@@ -63,7 +64,7 @@ export const _listConversations = async (
         status: conv.status,
         lastMessageAt: conv.lastMessageAt,
         lastMessagePreview: conv.lastMessagePreview,
-        otherParty: maskAccount(otherParty as any, accountId),
+        otherParty: applyFeeVisibility(maskAccount(otherParty as any, accountId), accountId),
         unreadCount: unread,
         matterName: matterId ? matterNameById.get(matterId) ?? null : null,
         intakeSummary: freeText ? freeText.slice(0, 60) : null,
@@ -93,8 +94,8 @@ export const _getConversation = async (
     message: "Conversation retrieved",
     data: {
       ...conv,
-      userAccount: maskAccount(conv.userAccount as any, viewerId),
-      lawyerAccount: maskAccount(conv.lawyerAccount as any, viewerId),
+      userAccount: applyFeeVisibility(maskAccount(conv.userAccount as any, viewerId), viewerId),
+      lawyerAccount: applyFeeVisibility(maskAccount(conv.lawyerAccount as any, viewerId), viewerId),
       matterName: area?.name ?? null,
       intakeSummary: freeText ? freeText.slice(0, 60) : null,
       // The brief the client filled in before requesting this lawyer — what they

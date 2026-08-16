@@ -14,12 +14,24 @@ import {
   listLeads,
   cancelRequest,
   declineRequest,
+  countConsumingRequestsInWindow,
 } from "../dao/request";
+import {
+  findActionableOffer,
+  attachRequestToOffer,
+  releaseBatchIfSettled,
+} from "../dao/matchOffer";
+import {
+  OFFER_WINDOW_MS,
+  OFFER_WINDOW_DAYS,
+  OFFERS_PER_AREA_PER_WINDOW,
+} from "../config/matchmaking";
 import { paginate, buildPagination } from "../helpers/pagination";
 import { computeRelevanceScore } from "../services/matchmaking";
 import { dispatchNotification } from "../services/notification";
 import { emitToAccount } from "../realtime/emitter";
 import { maskAccount } from "../services/anonymity";
+import { applyFeeVisibility } from "../services/feeVisibility";
 
 const REQUEST_TTL_DAYS = 7;
 
@@ -44,11 +56,50 @@ export const intakeSnippet = (intakePayload: any, max = 140): string | null => {
 
 export const _createRequest = async (
   userAccountId: string,
-  body: { lawyerAccountId: string; intakePayload: any }
+  body: { lawyerAccountId: string; intakePayload: any },
+  now: Date = new Date()
 ): Promise<Response> => {
   if (body.lawyerAccountId === userAccountId) {
     throw badRequest("Cannot send a request to yourself");
   }
+
+  // The practice area drives the cooldown and the quota, so it has to be present
+  // and real. It is denormalised onto the row because `intakePayload` is untyped
+  // Json and a JSON path can't be indexed.
+  const practiceAreaId = body.intakePayload?.matter;
+  if (typeof practiceAreaId !== "string" || !practiceAreaId) {
+    throw badRequest("Intake is missing the type of legal matter");
+  }
+  const area = await prisma.practiceArea.findUnique({
+    where: { id: practiceAreaId },
+    select: { id: true },
+  });
+  if (!area) throw badRequest("Unknown practice area");
+
+  // Match, don't browse: you can only request someone the system offered you.
+  // Without this the whole matching funnel — cooldown, rotation, quota — is
+  // side-stepped by finding a lawyer through name search and requesting directly.
+  const offer = await findActionableOffer(userAccountId, body.lawyerAccountId, now);
+  if (!offer) {
+    throw forbidden(
+      "You can only send a request to a lawyer you've been matched with. Start from 'Get a Lawyer' to be matched."
+    );
+  }
+  if (offer.practiceAreaId !== practiceAreaId) {
+    throw badRequest("This match was for a different type of legal matter");
+  }
+
+  const used = await countConsumingRequestsInWindow(
+    userAccountId,
+    practiceAreaId,
+    new Date(now.getTime() - OFFER_WINDOW_MS)
+  );
+  if (used >= OFFERS_PER_AREA_PER_WINDOW) {
+    throw badRequest(
+      `You've sent your ${OFFERS_PER_AREA_PER_WINDOW} requests for this type of matter in the last ${OFFER_WINDOW_DAYS} days. Requests that were declined or went unanswered don't count — you can send another once one of your open requests is resolved.`
+    );
+  }
+
   const lawyer = await prisma.account.findUnique({
     where: { id: body.lawyerAccountId },
     include: { lawyerProfile: true, firmProfile: true },
@@ -80,14 +131,21 @@ export const _createRequest = async (
   }
 
   const score = await computeRelevanceScore(body.intakePayload, body.lawyerAccountId);
-  const expiresAt = new Date(Date.now() + REQUEST_TTL_DAYS * 24 * 60 * 60 * 1000);
+  const expiresAt = new Date(now.getTime() + REQUEST_TTL_DAYS * 24 * 60 * 60 * 1000);
   const request = await createRequest({
     userAccountId,
     lawyerAccountId: body.lawyerAccountId,
     intakePayload: body.intakePayload,
+    practiceAreaId,
     relevanceScore: score,
     expiresAt,
   });
+
+  // Spend the offer. Best-effort: a failure here must not undo a request the
+  // client has already had confirmed — worst case they keep an unspent offer.
+  await attachRequestToOffer(offer.id, request.id).catch((err) =>
+    console.error("[request] failed to attach offer:", (err as Error).message)
+  );
 
   await dispatchNotification({
     recipientAccountId: body.lawyerAccountId,
@@ -121,7 +179,10 @@ export const _listMyRequests = async (
   );
   const decorated = items.map((it) => ({
     ...it,
-    lawyerAccount: maskAccount(it.lawyerAccount as any, viewerId),
+    lawyerAccount: applyFeeVisibility(
+      maskAccount(it.lawyerAccount as any, viewerId),
+      viewerId
+    ),
   }));
   return response({
     error: false,
@@ -141,8 +202,14 @@ export const _getRequest = async (id: string, viewerId: string): Promise<Respons
     message: "Request retrieved",
     data: {
       ...r,
-      userAccount: maskAccount(r.userAccount as any, viewerId),
-      lawyerAccount: maskAccount(r.lawyerAccount as any, viewerId),
+      userAccount: applyFeeVisibility(
+        maskAccount(r.userAccount as any, viewerId),
+        viewerId
+      ),
+      lawyerAccount: applyFeeVisibility(
+        maskAccount(r.lawyerAccount as any, viewerId),
+        viewerId
+      ),
     },
   });
 };
@@ -153,6 +220,9 @@ export const _cancelRequest = async (id: string, viewerId: string): Promise<Resp
   if (r.userAccountId !== viewerId) throw forbidden("Not your request");
   if (r.status !== "pending") throw badRequest("Only pending requests can be cancelled");
   await cancelRequest(id);
+  // Deliberately does NOT release the match offer. A decline or a lapse is the
+  // lawyer's doing and refunds the client's slot; cancelling is the client's own
+  // choice, and refunding it would make request-then-cancel a free reroll.
   return response({ error: false, message: "Request cancelled" });
 };
 
@@ -312,6 +382,15 @@ export const _declineLead = async (
   if (r.lawyerAccountId !== lawyerAccountId) throw forbidden("Not your lead");
   if (r.status !== "pending") throw conflict("Lead no longer pending");
   const updated = await declineRequest(id, reason);
+
+  // The client was matched with someone who then said no. Release the offer so
+  // they can be matched again straight away rather than sitting out the cooldown
+  // with nothing to show for it. The declining lawyer stays in the rotation
+  // history, so the next draw won't hand them back.
+  await releaseBatchIfSettled(id).catch((err) =>
+    console.error("[request] failed to release offer on decline:", (err as Error).message)
+  );
+
   await dispatchNotification({
     recipientAccountId: r.userAccountId,
     type: "request_declined",

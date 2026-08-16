@@ -4,6 +4,7 @@ import { response } from "../helpers/utility";
 import { Response } from "../interface";
 import { paginate, buildPagination } from "../helpers/pagination";
 import { maskAccount } from "../services/anonymity";
+import { applyFeeVisibility } from "../services/feeVisibility";
 import { visiblePostWhere, moderationStatusFor } from "../dao/post";
 import { env } from "../config/env";
 
@@ -13,7 +14,7 @@ const SIDEBAR_CACHE_KEY = "feed:sidebar";
 
 const decoratePost = (p: any, viewerId: string) => ({
   ...p,
-  author: maskAccount(p.author, viewerId),
+  author: applyFeeVisibility(maskAccount(p.author, viewerId), viewerId),
   moderationStatus: moderationStatusFor(p, viewerId),
 });
 

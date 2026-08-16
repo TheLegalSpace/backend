@@ -2,6 +2,7 @@ import cron from "node-cron";
 import { prisma } from "../config/database";
 import { dispatchNotification } from "../services/notification";
 import { matterNameOf } from "../logic/request";
+import { releaseBatchIfSettled } from "../dao/matchOffer";
 
 export const startStaleRequestJob = () => {
   cron.schedule("0 * * * *", async () => {
@@ -73,6 +74,12 @@ export const startStaleRequestJob = () => {
       data: { status: "expired" },
     });
     for (const s of stale) {
+      // The lawyer never answered, so the client should not be left sitting out
+      // the match cooldown on the strength of it — release the offer that
+      // produced this request and give the slot back.
+      await releaseBatchIfSettled(s.id).catch((err) =>
+        console.error("[cron] failed to release offer on expiry:", (err as Error).message)
+      );
       await dispatchNotification({
         recipientAccountId: s.userAccountId,
         type: "request_expired",

@@ -4,10 +4,34 @@ export const createRequest = async (data: {
   userAccountId: string;
   lawyerAccountId: string;
   intakePayload: any;
+  practiceAreaId: string;
   relevanceScore: number;
   expiresAt: Date;
 }) => {
   return prisma.request.create({ data });
+};
+
+/**
+ * Requests this user has sent for a practice area inside the quota window.
+ *
+ * Declined and expired requests are excluded — the client got no engagement out of
+ * them, so they should not count against the allowance. Cancelled requests are
+ * written as `expired` by `cancelRequest` and are excluded for the same reason
+ * (the offer that produced them stays consumed, so this is not a reroll route).
+ */
+export const countConsumingRequestsInWindow = async (
+  userAccountId: string,
+  practiceAreaId: string,
+  since: Date
+): Promise<number> => {
+  return prisma.request.count({
+    where: {
+      userAccountId,
+      practiceAreaId,
+      createdAt: { gte: since },
+      status: { in: ["pending", "accepted", "closed"] },
+    },
+  });
 };
 
 export const findRequestById = async (id: string) => {

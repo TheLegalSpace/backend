@@ -31,7 +31,10 @@ export const getMe = async (req: FastifyRequest, reply: FastifyReply) => {
 export const getProfileById = async (req: FastifyRequest, reply: FastifyReply) => {
   try {
     const { accountId } = req.params as { accountId: string };
-    return responseOk(reply, await _getProfileById(accountId, req.account.id));
+    return responseOk(
+      reply,
+      await _getProfileById(accountId, req.account.id, req.account.role)
+    );
   } catch (e) {
     return responseBad(reply, e);
   }

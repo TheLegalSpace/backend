@@ -8,6 +8,7 @@ import {
   getIntake,
   restartIntake,
   searchByText,
+  availability,
 } from "../controller/matchmaking";
 
 const intakeBody = {
@@ -60,6 +61,23 @@ export default async function matchmakingRoutes(fastify: FastifyInstance) {
     },
     search
   );
+  // Lets the intake screen tell the client up front that they're on cooldown or
+  // out of allowance for a practice area, rather than erroring after they've
+  // answered every question.
+  fastify.get(
+    "/availability",
+    {
+      schema: {
+        querystring: {
+          type: "object",
+          required: ["practiceAreaId"],
+          properties: { practiceAreaId: { type: "string", format: "uuid" } },
+        },
+      },
+    },
+    availability
+  );
+
   fastify.post("/intake", { schema: { body: partialIntakeBody } }, saveIntake);
   fastify.get("/intake", getIntake);
   fastify.post("/restart", restartIntake);

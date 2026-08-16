@@ -22,6 +22,7 @@ import {
   applyFeeRangeRollupTx,
 } from "../dao/profile";
 import { maskAccount } from "../services/anonymity";
+import { applyFeeVisibility } from "../services/feeVisibility";
 import { visiblePostWhere, moderationStatusFor } from "../dao/post";
 import { invalidateAccountCache } from "../middleware/auth";
 import { paginate, buildPagination } from "../helpers/pagination";
@@ -35,7 +36,11 @@ import {
   MAX_ARTICLE_ASSET_BYTES,
 } from "../services/storage";
 
-const enrichProfile = async (account: any, viewerId?: string | null) => {
+const enrichProfile = async (
+  account: any,
+  viewerId?: string | null,
+  viewerRole?: string | null
+) => {
   const masked = maskAccount(account, viewerId);
   let following = false;
   if (viewerId && viewerId !== account.id) {
@@ -46,12 +51,18 @@ const enrichProfile = async (account: any, viewerId?: string | null) => {
     minFee: l.feeMin,
     maxFee: l.feeMax,
   }));
-  return {
+  const enriched = {
     ...masked,
     isFollowing: following,
     practiceAreas,
     practiceAreaLinks: undefined,
   };
+  // Fees are visible to the owner, to admins, and to anyone with a real link to
+  // this account (a live match offer, a request, a connection). A cold profile
+  // visit gets the profile without the price list — otherwise the per-area fees
+  // are readable for any lawyer whose name you can guess, and the matching
+  // cooldown protects nothing.
+  return applyFeeVisibility(enriched, viewerId, viewerRole);
 };
 
 export const _getMe = async (accountId: string): Promise<Response> => {
@@ -82,14 +93,15 @@ export const _getMe = async (accountId: string): Promise<Response> => {
 
 export const _getProfileById = async (
   targetId: string,
-  viewerId: string
+  viewerId: string,
+  viewerRole?: string | null
 ): Promise<Response> => {
   const account = await findAccountById(targetId);
   if (!account || account.status === "deleted") throw notFound("Profile not found");
   return response({
     error: false,
     message: "Profile retrieved",
-    data: await enrichProfile(account, viewerId),
+    data: await enrichProfile(account, viewerId, viewerRole),
   });
 };
 
@@ -255,7 +267,9 @@ export const _getConnections = async (
   const { skip, take, page: p, limit: l } = paginate(page, limit);
   const total = await countConnectionsForAccount(targetId);
   const { accounts } = await findConnectionsForAccount(targetId, skip, take);
-  const items = accounts.map((a) => maskAccount(a as any, viewerId));
+  const items = accounts.map((a) =>
+    applyFeeVisibility(maskAccount(a as any, viewerId), viewerId)
+  );
   return response({
     error: false,
     message: "Connections retrieved",
@@ -339,7 +353,7 @@ export const _getProfilePosts = async (
   ]);
   const items = rows.map((p) => ({
     ...p,
-    author: maskAccount(p.author as any, viewerId),
+    author: applyFeeVisibility(maskAccount(p.author as any, viewerId), viewerId),
     moderationStatus: moderationStatusFor(p, viewerId),
   }));
   return response({

@@ -71,6 +71,8 @@ model Account {
   announcements     Announcement[]
   creditWallet       CreditWallet?
   creditTransactions CreditTransaction[]
+  matchOffersReceived  MatchOffer[]        @relation("MatchOfferUser")
+  matchOffersAsCandidate MatchOffer[]      @relation("MatchOfferCandidate")
 
   @@index([role, status])
   @@index([role, status, locationCity])
@@ -131,6 +133,7 @@ model PracticeArea {
   createdAt DateTime @default(now()) @map("created_at")
 
   accountLinks     AccountPracticeArea[]
+  matchOffers      MatchOffer[]
 
   @@map("practice_areas")
 }
@@ -236,6 +239,9 @@ model Request {
   userAccountId   String    @map("user_account_id") @db.Uuid
   lawyerAccountId String    @map("lawyer_account_id") @db.Uuid
   intakePayload   Json      @map("intake_payload")
+  // Denormalised from intakePayload.matter. The per-practice-area cooldown and
+  // the 2-per-7-days quota both filter on it, and a JSON path is not indexable.
+  practiceAreaId  String?   @map("practice_area_id") @db.Uuid
   relevanceScore  Int       @default(0) @map("relevance_score")
   status          String    @default("pending")
   conversationId  String?   @unique @map("conversation_id") @db.Uuid
@@ -247,11 +253,60 @@ model Request {
   userAccount   Account       @relation("UserRequests", fields: [userAccountId], references: [id], onDelete: Cascade)
   lawyerAccount Account       @relation("LawyerLeads", fields: [lawyerAccountId], references: [id], onDelete: Cascade)
   conversation  Conversation? @relation(fields: [conversationId], references: [id])
+  matchOffers   MatchOffer[]
 
   @@index([userAccountId, status, createdAt(sort: Desc)])
   @@index([lawyerAccountId, status, createdAt(sort: Desc)])
+  @@index([userAccountId, practiceAreaId, createdAt(sort: Desc)])
   @@index([expiresAt])
   @@map("requests")
+}
+
+// One row per lawyer/firm offered to a user for a given practice area. Rows shown
+// together share a `batchId` — a batch is at most one LAWYER and one FIRM.
+//
+// The same row does four jobs, which is why there is one table and not four:
+//   pin       — a repeat search inside the cooldown replays the stored batch
+//               instead of re-rolling, so re-running cannot enumerate the pool
+//   exposure  — "was this candidate already shown to this user" (rotation)
+//   cooldown  — a batch newer than MATCH_COOLDOWN_HOURS blocks a fresh roll
+//   gate      — POST /requests must target a live offer, so a user cannot route
+//               around matching by finding a lawyer through name search
+//
+// Two independent clocks: `createdAt + cooldown` is when a NEW offer is allowed,
+// `expiresAt` is how long THIS offer stays actionable (deliberately longer, so a
+// user who takes a few days to decide is not stranded). `releasedAt` lifts the
+// cooldown early when the offer came to nothing — a decline or a lapsed request.
+model MatchOffer {
+  id               String    @id @default(uuid()) @db.Uuid
+  batchId          String    @map("batch_id") @db.Uuid
+  userAccountId    String    @map("user_account_id") @db.Uuid
+  practiceAreaId   String    @map("practice_area_id") @db.Uuid
+  offeredAccountId String    @map("offered_account_id") @db.Uuid
+  offeredRole      String    @map("offered_role")
+  score            Int       @default(0)
+  matchedFactors   Json      @default("[]") @map("matched_factors")
+  // Snapshot of the intake that produced this offer, so a replay can report what
+  // the user originally asked for rather than what they have since typed.
+  intakeSnapshot   Json      @map("intake_snapshot")
+  // Set when the eligible pool was empty at the stated budget and the budget had
+  // to be relaxed to avoid a dead end. Surfaced so the UI can say so plainly.
+  budgetRelaxed    Boolean   @default(false) @map("budget_relaxed")
+  createdAt        DateTime  @default(now()) @map("created_at")
+  expiresAt        DateTime  @map("expires_at")
+  releasedAt       DateTime? @map("released_at")
+  requestId        String?   @map("request_id") @db.Uuid
+
+  user           Account      @relation("MatchOfferUser", fields: [userAccountId], references: [id], onDelete: Cascade)
+  offeredAccount Account      @relation("MatchOfferCandidate", fields: [offeredAccountId], references: [id], onDelete: Cascade)
+  practiceArea   PracticeArea @relation(fields: [practiceAreaId], references: [id], onDelete: Cascade)
+  request        Request?     @relation(fields: [requestId], references: [id], onDelete: SetNull)
+
+  @@index([userAccountId, practiceAreaId, createdAt(sort: Desc)])
+  @@index([userAccountId, offeredAccountId, createdAt(sort: Desc)])
+  @@index([batchId])
+  @@index([requestId])
+  @@map("match_offers")
 }
 
 model Conversation {

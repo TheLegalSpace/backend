@@ -3,6 +3,7 @@ import { response } from "../helpers/utility";
 import { Response } from "../interface";
 import { paginate, buildPagination } from "../helpers/pagination";
 import { maskAccount } from "../services/anonymity";
+import { redactFees } from "../services/feeVisibility";
 import { logSearch } from "../dao/analytics";
 
 const escapeLike = (q: string) => q.replace(/%/g, "\\%").replace(/_/g, "\\_");
@@ -45,7 +46,10 @@ export const _search = async (
       }),
       prisma.account.count({ where }),
     ]);
-    result.lawyers = items.map((a) => maskAccount(a as any, viewerId));
+    // Name search is the browse surface. Fees travel with a match or an existing
+    // relationship, never with a directory listing — otherwise looking lawyers up
+    // by name is a way straight around the matching cooldown.
+    result.lawyers = items.map((a) => redactFees(maskAccount(a as any, viewerId)));
     total += count;
   }
 
@@ -69,7 +73,7 @@ export const _search = async (
       }),
       prisma.account.count({ where }),
     ]);
-    result.firms = items.map((a) => maskAccount(a as any, viewerId));
+    result.firms = items.map((a) => redactFees(maskAccount(a as any, viewerId)));
     total += count;
   }
 
