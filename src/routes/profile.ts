@@ -19,6 +19,10 @@ import {
   setupLawyer,
   setupFirm,
   uploadVerificationDocument,
+  getVerificationState,
+  saveOnboardingDraft,
+  getOnboardingDraft,
+  clearOnboardingDraft,
 } from "../controller/profile";
 import {
   updateProfileSchema,
@@ -30,6 +34,7 @@ import {
   lawyerSetupSchema,
   firmSetupSchema,
   verificationDocSchema,
+  onboardingDraftSchema,
   paginationQuery,
 } from "../dto/profile";
 
@@ -78,6 +83,23 @@ export default async function profileRoutes(fastify: FastifyInstance) {
     "/me/firm/setup",
     { schema: firmSetupSchema, preHandler: requireRole("PENDING_PROFESSIONAL", "FIRM") },
     setupFirm
+  );
+  // Wizard draft state. Open to PENDING_PROFESSIONAL as well as LAWYER/FIRM —
+  // the account is still PENDING_PROFESSIONAL for most of the wizard, and a
+  // lawyer who paid before setup is LAWYER with no satellite profile yet.
+  const onboardingRoles = requireRole("PENDING_PROFESSIONAL", "LAWYER", "FIRM");
+  fastify.post(
+    "/me/onboarding-draft",
+    { schema: onboardingDraftSchema, preHandler: onboardingRoles },
+    saveOnboardingDraft
+  );
+  fastify.get("/me/onboarding-draft", { preHandler: onboardingRoles }, getOnboardingDraft);
+  fastify.delete("/me/onboarding-draft", { preHandler: onboardingRoles }, clearOnboardingDraft);
+
+  fastify.get(
+    "/me/verification",
+    { preHandler: requireRole("LAWYER", "FIRM") },
+    getVerificationState
   );
   fastify.post(
     "/me/verification/document",

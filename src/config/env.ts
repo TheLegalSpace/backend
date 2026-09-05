@@ -44,6 +44,14 @@ export const env = {
   vapidPrivateKey: process.env.VAPID_PRIVATE_KEY || "",
   vapidSubject: process.env.VAPID_SUBJECT || "mailto:support@thelegalspace.com",
 
+  // KYC enforcement. New LAWYER/FIRM accounts finish setup as `pending` and move
+  // to `under_review` once their required document is uploaded, so the admin
+  // queue is populated and the "under review" copy is honest. Enforcement is
+  // OFF until someone is actually working that queue — otherwise a lawyer who
+  // signs up today can't accept a lead until an admin clicks approve.
+  // Flip KYC_ENFORCEMENT_ENABLED=true when the queue is staffed.
+  kycEnforcementEnabled: process.env.KYC_ENFORCEMENT_ENABLED === "true",
+
   // WhatsApp (Meta Cloud API). Disabled until a verified WhatsApp Business number
   // + approved message templates exist — then flip WHATSAPP_ENABLED=true.
   whatsappEnabled: process.env.WHATSAPP_ENABLED === "true",

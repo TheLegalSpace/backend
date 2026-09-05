@@ -280,6 +280,19 @@ export const _acceptLead = async (
     if (existing.lawyerAccountId !== lawyerAccountId) throw forbidden("Not your lead");
     if (existing.status !== "pending") throw conflict("Lead no longer available");
 
+    // Deleting an account expires its pending requests, so this normally can't
+    // be reached. It is the backstop for the race (the client deletes between
+    // this lawyer opening the lead and tapping accept) and for any rows that
+    // predate that behaviour — accepting would otherwise open a conversation
+    // with an account that can never read it.
+    const client = await tx.account.findUnique({
+      where: { id: existing.userAccountId },
+      select: { status: true },
+    });
+    if (!client || client.status !== "active") {
+      throw conflict("This client's account is no longer active");
+    }
+
     const conversation = await tx.conversation.create({
       data: {
         userAccountId: existing.userAccountId,

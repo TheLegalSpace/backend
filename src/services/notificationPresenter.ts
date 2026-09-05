@@ -78,6 +78,24 @@ export const presentNotification = (notif: {
       } expired without a response`;
       path = p.requestId ? `/requests/${p.requestId}` : "/requests";
       break;
+    // The other party deleted their account. Deliberately not `request_expired`
+    // ("expired without a response" would be a lie) and not `request_declined`
+    // (nobody chose anything). `deletedParty` says which side left, because the
+    // client and the lawyer need to be told different things — and the actor
+    // renders as "Deleted Account", so the wording carries the meaning instead.
+    case "request_closed_account":
+      if (p.deletedParty === "client") {
+        title = "Lead withdrawn";
+        body = `A lead${matter ? ` about ${matter}` : ""} was withdrawn — the client's account is no longer active`;
+        path = "/leads";
+      } else {
+        title = "Request closed";
+        body = `Your request${
+          matter ? ` about ${matter}` : ""
+        } was closed — that account is no longer active. You can be matched again`;
+        path = "/requests";
+      }
+      break;
     case "new_message":
       title = actor ? `New message from ${actor}` : "New message";
       body = p.snippet || `${actor || SOMEONE} sent you a message`;

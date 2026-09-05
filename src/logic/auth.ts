@@ -9,6 +9,9 @@ import {
   softDeleteAccount,
 } from "../dao/account";
 import { invalidateAccountCache } from "../middleware/auth";
+import { releaseBatchIfSettled } from "../dao/matchOffer";
+import { dispatchNotification } from "../services/notification";
+import { matterNameOf } from "./request";
 
 const ROLE_KEY = (email: string) => `register:role:${email.toLowerCase()}`;
 const ROLE_TTL_SECONDS = 24 * 60 * 60;
@@ -358,8 +361,38 @@ export const _deleteAccount = async (
   accountId: string,
   authUserId: string
 ): Promise<Response> => {
-  await softDeleteAccount(accountId);
+  const { expiredRequests } = await softDeleteAccount(accountId);
   await supabaseAdmin.auth.admin.deleteUser(authUserId).catch(() => null);
   await invalidateAccountCache(authUserId);
+
+  // Post-commit, and best-effort: the account is already gone, and a failed
+  // notification must not surface as a failed deletion. Same shape as the
+  // stale-request cron, which settles requests the same way.
+  for (const r of expiredRequests) {
+    const clientLeft = r.userAccountId === accountId;
+    const recipientAccountId = clientLeft ? r.lawyerAccountId : r.userAccountId;
+    try {
+      // The client got nothing out of the match, so give their cooldown and
+      // allowance slot back rather than making them sit out 48h for someone
+      // else's departure. Moot when it was the client who left.
+      await releaseBatchIfSettled(r.id);
+      await dispatchNotification({
+        recipientAccountId,
+        type: "request_closed_account",
+        payload: {
+          requestId: r.id,
+          actorAccountId: accountId,
+          matterName: await matterNameOf(r.intakePayload),
+          deletedParty: clientLeft ? "client" : "lawyer",
+        },
+      });
+    } catch (err) {
+      console.error(
+        "[auth] failed to settle request on account deletion:",
+        (err as Error).message
+      );
+    }
+  }
+
   return response({ error: false, message: "Account deleted" });
 };

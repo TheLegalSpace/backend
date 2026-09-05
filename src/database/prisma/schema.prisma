@@ -73,6 +73,7 @@ model Account {
   creditTransactions CreditTransaction[]
   matchOffersReceived  MatchOffer[]        @relation("MatchOfferUser")
   matchOffersAsCandidate MatchOffer[]      @relation("MatchOfferCandidate")
+  deletionRecord    AccountDeletionRecord?
 
   @@index([role, status])
   @@index([role, status, locationCity])
@@ -783,4 +784,35 @@ model PaymentMethod {
   @@unique([accountId, paystackAuthorizationCode])
   @@index([accountId])
   @@map("payment_methods")
+}
+
+/// Identity archive for a deleted account. Deleting an account deactivates it
+/// and scrubs the contact/identity fields off the live `accounts` row (they ride
+/// along in every `include: { author: true }` response, so anything left there
+/// leaks); the values land here first. This table is read only by admin code.
+model AccountDeletionRecord {
+  id            String   @id @default(uuid()) @db.Uuid
+  accountId     String   @unique @map("account_id") @db.Uuid
+  authUserId    String   @map("auth_user_id")
+  role          String
+  membershipTier String  @map("membership_tier")
+  email         String
+  phone         String?
+  fullName      String   @map("full_name")
+  firstName     String?  @map("first_name")
+  lastName      String?  @map("last_name")
+  /// Denormalised from the satellite so the record stands alone as evidence of
+  /// who was practising under this account. The satellite rows are retained too.
+  scn           String?
+  rcNumber      String?  @map("rc_number")
+  deletedAt     DateTime @map("deleted_at")
+  /// deletedAt + DELETION_RECORD_RETENTION_YEARS. Nothing purges on it yet.
+  purgeAfter    DateTime @map("purge_after")
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  account Account @relation(fields: [accountId], references: [id], onDelete: Cascade)
+
+  @@index([email])
+  @@index([deletedAt(sort: Desc)])
+  @@map("account_deletion_records")
 }

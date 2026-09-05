@@ -20,6 +20,7 @@ import {
 } from "../controller/announcement";
 import {
   listAccounts,
+  accountDeletionRecord,
   suspend,
   unsuspend,
   kycQueue,
@@ -149,6 +150,13 @@ export default async function adminRoutes(fastify: FastifyInstance) {
       },
     },
     listAccounts
+  );
+
+  // The retained identity behind a deleted account. Reading it is audited.
+  fastify.get(
+    "/accounts/:id/deletion-record",
+    { schema: { params: idParam } },
+    accountDeletionRecord
   );
 
   fastify.patch(

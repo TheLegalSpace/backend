@@ -1,6 +1,7 @@
 import { FastifyRequest, FastifyReply } from "fastify";
 import {
   _listAccounts,
+  _accountDeletionRecord,
   _suspendAccount,
   _unsuspendAccount,
   _kycQueue,
@@ -213,6 +214,15 @@ export const listAccounts = async (req: FastifyRequest, reply: FastifyReply) => 
       reply,
       await _listAccounts({ role, status, verificationStatus, q }, page, limit)
     );
+  } catch (e) {
+    return responseBad(reply, e);
+  }
+};
+
+export const accountDeletionRecord = async (req: FastifyRequest, reply: FastifyReply) => {
+  try {
+    const { id } = req.params as { id: string };
+    return responseOk(reply, await _accountDeletionRecord(req.account.id, id));
   } catch (e) {
     return responseBad(reply, e);
   }

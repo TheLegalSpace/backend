@@ -31,6 +31,15 @@ import {
   professionalPracticeAreaLimit,
 } from "../config/membership";
 import {
+  INITIAL_VERIFICATION_STATUS,
+  UNDER_REVIEW_STATUS,
+  DOC_TYPE_LABELS,
+  allowedDocTypes,
+  requiredDocTypes,
+} from "../config/verification";
+import { setVerificationStatus, listVerificationDocuments } from "../dao/admin";
+import { redis } from "../config/redis";
+import {
   uploadToR2,
   MAX_AVATAR_BYTES,
   MAX_ARTICLE_ASSET_BYTES,
@@ -529,7 +538,11 @@ export const _setupLawyer = async (
         callToBarYear: body.callToBarYear,
         feeRangeMin,
         feeRangeMax,
-        verificationStatus: "verified",
+        // Starts unverified — the wizard's last step tells them their profile is
+        // "under review", and it has to actually be true. Uploading the required
+        // document moves this to `under_review`, which is what the admin KYC
+        // queue filters on. See INITIAL_VERIFICATION_STATUS.
+        verificationStatus: INITIAL_VERIFICATION_STATUS,
       },
     });
     await tx.accountPracticeArea.createMany({
@@ -552,6 +565,8 @@ export const _setupLawyer = async (
   });
 
   await invalidateAccountCache(account.authUserId);
+  // The wizard payload has landed for real — the draft has nothing left to restore.
+  await redis.del(onboardingDraftKey(accountId)).catch(() => null);
   return response({
     error: false,
     message: "Lawyer setup complete",
@@ -562,7 +577,7 @@ export const _setupLawyer = async (
 interface FirmSetupInput {
   firmName: string;
   whatsappNumber: string;
-  officeAddress: string;
+  officeAddress?: string;
   firmEstablishmentYear: number;
   locationCity: string;
   locationCountry?: string;
@@ -616,10 +631,10 @@ export const _setupFirm = async (
         accountId,
         firmName: body.firmName,
         firmEstablishmentYear: body.firmEstablishmentYear,
-        officeAddress: body.officeAddress,
+        officeAddress: body.officeAddress || null,
         feeRangeMin,
         feeRangeMax,
-        verificationStatus: "verified",
+        verificationStatus: INITIAL_VERIFICATION_STATUS,
       },
     });
     await tx.accountPracticeArea.createMany({
@@ -642,6 +657,7 @@ export const _setupFirm = async (
   });
 
   await invalidateAccountCache(account.authUserId);
+  await redis.del(onboardingDraftKey(accountId)).catch(() => null);
   return response({
     error: false,
     message: "Firm setup complete",
@@ -649,8 +665,62 @@ export const _setupFirm = async (
   });
 };
 
-const LAWYER_DOC_TYPES = ["call_to_bar_cert", "practicing_cert", "id_card"];
-const FIRM_DOC_TYPES = ["cac_cert"];
+const verificationStatusOf = (account: any): string =>
+  account?.lawyerProfile?.verificationStatus ||
+  account?.firmProfile?.verificationStatus ||
+  INITIAL_VERIFICATION_STATUS;
+
+/**
+ * What the "Verify Your Professional Status" step and the profile badge need in
+ * one call: the current status, which documents this role owes us, and what has
+ * already been received.
+ *
+ * `canSubmitForReview` is false once the account is already `under_review` or
+ * decided — re-uploading after an admin has ruled shouldn't silently reopen the
+ * case.
+ */
+export const _getVerificationState = async (accountId: string): Promise<Response> => {
+  const account = await findAccountById(accountId);
+  if (!account) throw notFound("Account not found");
+  if (account.role !== "LAWYER" && account.role !== "FIRM") {
+    throw forbidden("Only LAWYER or FIRM accounts have a verification state");
+  }
+
+  const docs = await listVerificationDocuments(accountId);
+  const uploadedTypes = new Set(docs.map((d: any) => d.docType));
+  const required = requiredDocTypes(account.role);
+  const status = verificationStatusOf(account);
+
+  return response({
+    error: false,
+    message: "Verification state retrieved",
+    data: {
+      status,
+      requiredDocTypes: required.map((t) => ({
+        docType: t,
+        label: DOC_TYPE_LABELS[t] || t,
+        uploaded: uploadedTypes.has(t),
+      })),
+      optionalDocTypes: allowedDocTypes(account.role)
+        .filter((t) => !required.includes(t))
+        .map((t) => ({
+          docType: t,
+          label: DOC_TYPE_LABELS[t] || t,
+          uploaded: uploadedTypes.has(t),
+        })),
+      missingDocTypes: required.filter((t) => !uploadedTypes.has(t)),
+      uploaded: docs.map((d: any) => ({
+        id: d.id,
+        docType: d.docType,
+        label: DOC_TYPE_LABELS[d.docType] || d.docType,
+        status: d.status,
+        rejectionReason: d.rejectionReason,
+        createdAt: d.createdAt,
+      })),
+      canSubmitForReview: status === INITIAL_VERIFICATION_STATUS,
+    },
+  });
+};
 
 export const _uploadVerificationDocument = async (
   accountId: string,
@@ -661,14 +731,11 @@ export const _uploadVerificationDocument = async (
   mimetype: string,
   filename: string
 ): Promise<Response> => {
-  if (role === "LAWYER" && !LAWYER_DOC_TYPES.includes(docType)) {
-    throw badRequest(`Lawyer accounts cannot upload docType "${docType}"`);
-  }
-  if (role === "FIRM" && !FIRM_DOC_TYPES.includes(docType)) {
-    throw badRequest(`Firm accounts cannot upload docType "${docType}"`);
-  }
   if (role !== "LAWYER" && role !== "FIRM") {
     throw forbidden("Only LAWYER or FIRM accounts can upload verification documents");
+  }
+  if (!allowedDocTypes(role).includes(docType)) {
+    throw badRequest(`${role === "FIRM" ? "Firm" : "Lawyer"} accounts cannot upload docType "${docType}"`);
   }
 
   const { key } = await uploadToR2({
@@ -689,10 +756,109 @@ export const _uploadVerificationDocument = async (
     },
   });
 
+  // The transition that actually matters: once every required document for the
+  // role is in, the profile moves `pending` -> `under_review`, which is the only
+  // status `listKycQueue` selects. Without this the upload is a dead end — the
+  // wizard promises a review nobody is queued for.
+  //
+  // Only ever moves forward from `pending`. An account an admin has already
+  // ruled on is not reopened by an upload; that's an admin decision.
+  const account = await findAccountById(accountId);
+  const status = verificationStatusOf(account);
+  let submittedForReview = false;
+
+  if (status === INITIAL_VERIFICATION_STATUS) {
+    const docs = await listVerificationDocuments(accountId);
+    const uploadedTypes = new Set(docs.map((d: any) => d.docType));
+    const missing = requiredDocTypes(role).filter((t) => !uploadedTypes.has(t));
+    if (missing.length === 0) {
+      await setVerificationStatus(accountId, UNDER_REVIEW_STATUS);
+      submittedForReview = true;
+    }
+  }
+
   await invalidateAccountCache(authUserId);
   return response({
     error: false,
-    message: "Verification document uploaded",
-    data: doc,
+    message: submittedForReview
+      ? "Document uploaded — your profile has been submitted for review"
+      : "Verification document uploaded",
+    data: {
+      document: doc,
+      verificationStatus: submittedForReview ? UNDER_REVIEW_STATUS : status,
+      submittedForReview,
+    },
   });
+};
+
+/**
+ * Onboarding draft — the partial state behind the wizard's "Save & Continue".
+ *
+ * The setup call (`POST /profile/me/{lawyer,firm}/setup`) is deliberately
+ * atomic: it creates the account role, the satellite profile and the practice
+ * areas in one transaction, so there is no half-built professional account. But
+ * the design collects that payload across three screens ("Tell Us About
+ * Yourself" -> "Professional Information" -> "Professional Fees"), and the
+ * Professional path additionally leaves the site for Paystack in between.
+ *
+ * So the steps write here, and only the final screen submits to `setup`. Redis
+ * rather than a table: it's throwaway state with a natural expiry, and it
+ * mirrors `matchmaking/intake`, which solves the same problem for the client
+ * intake wizard.
+ *
+ * TTL is a week — long enough to survive a Paystack round-trip, a closed tab, or
+ * someone finishing on a different device tomorrow.
+ */
+const ONBOARDING_DRAFT_TTL = 7 * 24 * 60 * 60;
+// The real setup payload is a few hundred bytes; 32KB is generous. The body is
+// open-ended by design, so it needs a ceiling — otherwise the endpoint is a free
+// Redis write of arbitrary size for any authenticated account.
+const MAX_ONBOARDING_DRAFT_BYTES = 32 * 1024;
+const onboardingDraftKey = (accountId: string) => `onboarding:draft:${accountId}`;
+
+export const _saveOnboardingDraft = async (
+  accountId: string,
+  partial: Record<string, any>
+): Promise<Response> => {
+  const existing = await redis.get(onboardingDraftKey(accountId)).catch(() => null);
+  let merged: Record<string, any> = {};
+  if (existing) {
+    try {
+      merged = JSON.parse(existing);
+    } catch {}
+  }
+  // Shallow merge so a step only overwrites its own fields — "Professional Fees"
+  // must not wipe what "Tell Us About Yourself" saved.
+  merged = { ...merged, ...partial, updatedAt: new Date().toISOString() };
+
+  const serialized = JSON.stringify(merged);
+  if (Buffer.byteLength(serialized, "utf8") > MAX_ONBOARDING_DRAFT_BYTES) {
+    throw badRequest("Onboarding draft is too large");
+  }
+
+  await redis
+    .set(onboardingDraftKey(accountId), serialized, "EX", ONBOARDING_DRAFT_TTL)
+    .catch(() => null);
+  return response({ error: false, message: "Draft saved", data: merged });
+};
+
+export const _getOnboardingDraft = async (accountId: string): Promise<Response> => {
+  const cached = await redis.get(onboardingDraftKey(accountId)).catch(() => null);
+  if (!cached) {
+    return response({ error: false, message: "Draft retrieved", data: {} });
+  }
+  try {
+    return response({
+      error: false,
+      message: "Draft retrieved",
+      data: JSON.parse(cached),
+    });
+  } catch {
+    return response({ error: false, message: "Draft retrieved", data: {} });
+  }
+};
+
+export const _clearOnboardingDraft = async (accountId: string): Promise<Response> => {
+  await redis.del(onboardingDraftKey(accountId)).catch(() => null);
+  return response({ error: false, message: "Draft cleared" });
 };

@@ -111,10 +111,13 @@ export const lawyerSetupSchema = {
 export const firmSetupSchema = {
   body: {
     type: "object",
+    // `officeAddress` is deliberately NOT required. The signup wizard's firm form
+    // collects firm name, WhatsApp, year established and location only — a
+    // required field the form never renders is a 400 on every firm signup. It
+    // stays on FirmProfile and is editable later via PATCH /profile/me/firm.
     required: [
       "firmName",
       "whatsappNumber",
-      "officeAddress",
       "firmEstablishmentYear",
       "locationCity",
       "practiceAreas",
@@ -132,6 +135,17 @@ export const firmSetupSchema = {
         items: practiceAreaFeeSchema,
       },
     },
+  },
+};
+
+// The wizard's per-step draft. Intentionally open-ended — it holds whatever
+// subset of the setup payload the user has filled in so far, and the real
+// validation happens at POST /profile/me/{lawyer,firm}/setup where the values
+// are actually persisted. Size is capped in the logic layer.
+export const onboardingDraftSchema = {
+  body: {
+    type: "object",
+    additionalProperties: true,
   },
 };
 

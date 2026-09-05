@@ -21,6 +21,7 @@ import {
   promotionStats,
 } from "../dao/service";
 import { listEventsAdmin } from "../dao/event";
+import { findDeletionRecordByAccountId } from "../dao/accountDeletionRecord";
 import { closeReportsForDeletedPost } from "../dao/postReport";
 import { listAllPlans, getPlanById, updatePlan } from "../dao/membership";
 import { createPlan } from "../services/paystack";
@@ -44,6 +45,34 @@ export const _listAccounts = async (
     error: false,
     message: "Accounts retrieved",
     data: { items, pagination: buildPagination(total, p, l) },
+  });
+};
+
+/**
+ * The identity behind a deleted account, for a dispute or a complaint.
+ *
+ * Reading it is itself audited. This is retained personal data held under a
+ * legal-claim basis, so who looked and when is part of what makes holding it
+ * defensible — and a GET with a side effect is the right trade here.
+ */
+export const _accountDeletionRecord = async (
+  adminId: string,
+  accountId: string
+): Promise<Response> => {
+  const record = await findDeletionRecordByAccountId(accountId);
+  if (!record) throw notFound("No deletion record for this account");
+
+  await recordAuditLog({
+    adminAccountId: adminId,
+    action: "account.deletion_record.view",
+    targetType: "account",
+    targetId: accountId,
+  });
+
+  return response({
+    error: false,
+    message: "Deletion record retrieved",
+    data: record,
   });
 };
 

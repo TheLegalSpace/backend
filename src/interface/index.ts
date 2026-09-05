@@ -25,6 +25,7 @@ export type NotificationType =
   | "request_accepted"
   | "request_declined"
   | "request_expired"
+  | "request_closed_account"
   | "new_message"
   | "reply_reminder"
   | "unread_client_message"

@@ -17,6 +17,10 @@ import {
   _setupLawyer,
   _setupFirm,
   _uploadVerificationDocument,
+  _getVerificationState,
+  _saveOnboardingDraft,
+  _getOnboardingDraft,
+  _clearOnboardingDraft,
 } from "../logic/profile";
 import { responseOk, responseCreated, responseBad } from "../helpers/utility";
 
@@ -174,6 +178,14 @@ export const setupFirm = async (req: FastifyRequest, reply: FastifyReply) => {
   }
 };
 
+export const getVerificationState = async (req: FastifyRequest, reply: FastifyReply) => {
+  try {
+    return responseOk(reply, await _getVerificationState(req.account.id));
+  } catch (e) {
+    return responseBad(reply, e);
+  }
+};
+
 export const uploadVerificationDocument = async (req: FastifyRequest, reply: FastifyReply) => {
   try {
     const { docType } = req.query as { docType: string };
@@ -190,6 +202,30 @@ export const uploadVerificationDocument = async (req: FastifyRequest, reply: Fas
         filename
       )
     );
+  } catch (e) {
+    return responseBad(reply, e);
+  }
+};
+
+export const saveOnboardingDraft = async (req: FastifyRequest, reply: FastifyReply) => {
+  try {
+    return responseOk(reply, await _saveOnboardingDraft(req.account.id, req.body as any));
+  } catch (e) {
+    return responseBad(reply, e);
+  }
+};
+
+export const getOnboardingDraft = async (req: FastifyRequest, reply: FastifyReply) => {
+  try {
+    return responseOk(reply, await _getOnboardingDraft(req.account.id));
+  } catch (e) {
+    return responseBad(reply, e);
+  }
+};
+
+export const clearOnboardingDraft = async (req: FastifyRequest, reply: FastifyReply) => {
+  try {
+    return responseOk(reply, await _clearOnboardingDraft(req.account.id));
   } catch (e) {
     return responseBad(reply, e);
   }
