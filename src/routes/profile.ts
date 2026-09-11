@@ -19,11 +19,20 @@ import {
   setupLawyer,
   setupFirm,
   uploadVerificationDocument,
-  getVerificationState,
   saveOnboardingDraft,
   getOnboardingDraft,
   clearOnboardingDraft,
 } from "../controller/profile";
+import {
+  submitBarDetails,
+  raiseScnDispute,
+  uploadDisputeEvidence,
+  getMyDispute,
+  verifyIdentity,
+  submitApplication,
+  getVerificationState,
+} from "../controller/verification";
+import { stricter } from "../middleware/rateLimiter";
 import {
   updateProfileSchema,
   toggleAnonymousSchema,
@@ -35,6 +44,10 @@ import {
   firmSetupSchema,
   verificationDocSchema,
   onboardingDraftSchema,
+  barDetailsSchema,
+  scnDisputeSchema,
+  identityVerifySchema,
+  disputeIdParamSchema,
   paginationQuery,
 } from "../dto/profile";
 
@@ -96,6 +109,48 @@ export default async function profileRoutes(fastify: FastifyInstance) {
   fastify.get("/me/onboarding-draft", { preHandler: onboardingRoles }, getOnboardingDraft);
   fastify.delete("/me/onboarding-draft", { preHandler: onboardingRoles }, clearOnboardingDraft);
 
+  // --- Professional identity verification (lawyer signup wizard) ------------
+  //
+  // Bar details is rate limited hard. An SCN is guessable (a year plus a short
+  // sequence) and a hit returns a masked name and email, so without a ceiling
+  // the endpoint is a roster scraper. Combined with needing a verified-email
+  // account, enumeration costs a signup per handful of probes.
+  fastify.post(
+    "/me/bar-details",
+    {
+      schema: barDetailsSchema,
+      preHandler: onboardingRoles,
+      ...stricter(10, "1 hour"),
+    },
+    submitBarDetails
+  );
+  fastify.post(
+    "/me/bar-details/dispute",
+    { schema: scnDisputeSchema, preHandler: onboardingRoles, ...stricter(5, "1 hour") },
+    raiseScnDispute
+  );
+  fastify.get(
+    "/me/bar-details/dispute",
+    { preHandler: onboardingRoles },
+    getMyDispute
+  );
+  fastify.post(
+    "/me/bar-details/dispute/:id/evidence",
+    { schema: disputeIdParamSchema, preHandler: onboardingRoles },
+    uploadDisputeEvidence
+  );
+  // Two attempts, each a paid lookup. The per-hour ceiling is a second line of
+  // defence behind the attempt counter in the logic layer.
+  fastify.post(
+    "/me/identity",
+    { schema: identityVerifySchema, preHandler: requireRole("LAWYER"), ...stricter(6, "1 hour") },
+    verifyIdentity
+  );
+  fastify.post(
+    "/me/application",
+    { preHandler: requireRole("LAWYER", "FIRM") },
+    submitApplication
+  );
   fastify.get(
     "/me/verification",
     { preHandler: requireRole("LAWYER", "FIRM") },

@@ -1,4 +1,5 @@
 import { FastifyInstance } from "fastify";
+import { listScnDisputes, resolveScnDispute } from "../controller/verification";
 import { authHook } from "../middleware/auth";
 import { requireRole } from "../middleware/requireRole";
 import {
@@ -178,6 +179,48 @@ export default async function adminRoutes(fastify: FastifyInstance) {
     "/accounts/:accountId/verification-documents",
     { schema: { params: accountIdParam } },
     verificationDocuments
+  );
+
+  // SCN impersonation disputes. Separate from the KYC queue because the unit of
+  // work is a pair of accounts and a ruling between them, not one application.
+  fastify.get(
+    "/scn-disputes",
+    {
+      schema: {
+        querystring: {
+          type: "object",
+          properties: {
+            page: { type: "integer", default: 1 },
+            limit: { type: "integer", default: 20 },
+            status: {
+              type: "string",
+              enum: ["open", "resolved_claimant", "resolved_existing", "dismissed"],
+            },
+          },
+        },
+      },
+    },
+    listScnDisputes
+  );
+  fastify.post(
+    "/scn-disputes/:id/resolve",
+    {
+      schema: {
+        params: idParam,
+        body: {
+          type: "object",
+          required: ["outcome"],
+          properties: {
+            outcome: {
+              type: "string",
+              enum: ["resolved_claimant", "resolved_existing", "dismissed"],
+            },
+            note: { type: "string", maxLength: 1000 },
+          },
+        },
+      },
+    },
+    resolveScnDispute
   );
 
   fastify.get(

@@ -17,7 +17,6 @@ import {
   _setupLawyer,
   _setupFirm,
   _uploadVerificationDocument,
-  _getVerificationState,
   _saveOnboardingDraft,
   _getOnboardingDraft,
   _clearOnboardingDraft,
@@ -173,14 +172,6 @@ export const setupLawyer = async (req: FastifyRequest, reply: FastifyReply) => {
 export const setupFirm = async (req: FastifyRequest, reply: FastifyReply) => {
   try {
     return responseCreated(reply, await _setupFirm(req.account.id, req.body as any));
-  } catch (e) {
-    return responseBad(reply, e);
-  }
-};
-
-export const getVerificationState = async (req: FastifyRequest, reply: FastifyReply) => {
-  try {
-    return responseOk(reply, await _getVerificationState(req.account.id));
   } catch (e) {
     return responseBad(reply, e);
   }

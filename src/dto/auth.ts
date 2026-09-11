@@ -6,6 +6,9 @@ export const registerStartSchema = {
       email: { type: "string", format: "email" },
       password: { type: "string", minLength: 8 },
       role: { type: "string", enum: ["USER", "PENDING_PROFESSIONAL"] },
+      // reCAPTCHA response token. Required only while CAPTCHA_ENABLED=true, so
+      // local and preview environments need no key pair.
+      captchaToken: { type: "string", maxLength: 4000 },
     },
   },
 };

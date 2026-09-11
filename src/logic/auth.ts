@@ -9,6 +9,7 @@ import {
   softDeleteAccount,
 } from "../dao/account";
 import { invalidateAccountCache } from "../middleware/auth";
+import { verifyCaptcha } from "../services/captcha";
 import { releaseBatchIfSettled } from "../dao/matchOffer";
 import { dispatchNotification } from "../services/notification";
 import { matterNameOf } from "./request";
@@ -55,10 +56,15 @@ interface RegisterStartBody {
   email: string;
   password: string;
   role: Role;
+  captchaToken?: string;
 }
 
 export const _registerStart = async (body: RegisterStartBody): Promise<Response> => {
   if (body.role === "ADMIN") throw badRequest("Cannot self-register as ADMIN");
+
+  // Before anything is created in Supabase — a captcha that runs after the
+  // account exists has already let the bot win.
+  await verifyCaptcha(body.captchaToken);
 
   const existing = await findAccountByEmail(body.email);
   if (existing && existing.status !== "deleted") {

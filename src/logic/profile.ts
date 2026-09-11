@@ -32,12 +32,12 @@ import {
 } from "../config/membership";
 import {
   INITIAL_VERIFICATION_STATUS,
-  UNDER_REVIEW_STATUS,
-  DOC_TYPE_LABELS,
+  DECIDED_STATUSES,
+  DISPUTE_EVIDENCE_DOC_TYPE,
   allowedDocTypes,
   requiredDocTypes,
 } from "../config/verification";
-import { setVerificationStatus, listVerificationDocuments } from "../dao/admin";
+import { listVerificationDocuments, createVerificationDocument } from "../dao/verification";
 import { redis } from "../config/redis";
 import {
   uploadToR2,
@@ -74,6 +74,63 @@ const enrichProfile = async (
   return applyFeeVisibility(enriched, viewerId, viewerRole);
 };
 
+/**
+ * Where a professional is in the signup wizard, as a single field.
+ *
+ * `nextStep` is the screen the client should resume on. Derived rather than
+ * stored so it can never drift from the rows it describes.
+ */
+const onboardingState = (account: any) => {
+  const profile: any = account.lawyerProfile || account.firmProfile;
+  const verificationStatus = profile?.verificationStatus ?? null;
+  const hasBarDetails = Boolean(account.lawyerProfile?.scn);
+  const identityChecked = Boolean(account.lawyerProfile?.identityCheckStatus);
+  const submitted = Boolean(profile?.applicationSubmittedAt);
+  const profileComplete = Boolean(account.profileCompletedAt);
+  const isProfessionalTier = account.membershipTier === "professional";
+
+  // A firm has no bar-details or NIN step yet, and its satellite is still
+  // created at setup — so its wizard is the older shape: plan, then setup.
+  const isFirm = account.role === "FIRM";
+
+  let nextStep = "complete";
+  if (isFirm) {
+    if (!isProfessionalTier && !profileComplete) nextStep = "select_plan";
+    else if (!profileComplete) nextStep = "profile_setup";
+    else if (!submitted) nextStep = "submit_application";
+    else if (verificationStatus === "under_review") nextStep = "await_review";
+    else if (verificationStatus === "rejected") nextStep = "rejected";
+    return {
+      nextStep,
+      verificationStatus,
+      hasBarDetails: false,
+      identityChecked: false,
+      applicationSubmitted: submitted,
+      profileComplete,
+      disputeOpen: false,
+    };
+  }
+
+  if (!hasBarDetails) nextStep = "bar_details";
+  else if (!identityChecked) nextStep = "identity";
+  else if (!submitted) nextStep = "submit_application";
+  else if (verificationStatus === "under_review") nextStep = "await_review";
+  else if (verificationStatus === "disputed") nextStep = "await_dispute";
+  else if (verificationStatus === "rejected") nextStep = "rejected";
+  else if (!isProfessionalTier) nextStep = "select_plan";
+  else if (!profileComplete) nextStep = "profile_setup";
+
+  return {
+    nextStep,
+    verificationStatus,
+    hasBarDetails,
+    identityChecked,
+    applicationSubmitted: submitted,
+    profileComplete,
+    disputeOpen: Boolean((profile?.verificationFlags as any)?.disputeOpen),
+  };
+};
+
 export const _getMe = async (accountId: string): Promise<Response> => {
   const account = await findAccountById(accountId);
   if (!account) throw notFound("Account not found");
@@ -96,6 +153,10 @@ export const _getMe = async (accountId: string): Promise<Response> => {
       // Professional, 1 on Community). Exposed so the setup wizard caps the
       // picker at the same number the API enforces instead of hardcoding it.
       practiceAreaLimit: practiceAreaLimitFor(account.membershipTier, account.role),
+      // Explicit wizard state, so the client never has to infer where someone
+      // got to. It used to test for a null satellite profile, which stopped
+      // working when the satellite moved to the bar-details step.
+      onboarding: isProfessional ? onboardingState(account) : null,
     },
   });
 };
@@ -456,7 +517,11 @@ export const _setProfessionalRole = async (
   if (!["PENDING_PROFESSIONAL", "LAWYER", "FIRM"].includes(account.role)) {
     throw forbidden("Only professional accounts can set an account type");
   }
-  if (account.lawyerProfile || account.firmProfile) {
+  // Completeness is `profileCompletedAt`, NOT the presence of a satellite: the
+  // satellite is created at the bar-details step, and the wizard has a back
+  // arrow from there to this screen. Testing for the satellite would 409 a
+  // legitimate back-navigation with a message that isn't true.
+  if (account.profileCompletedAt) {
     throw conflict("Profile setup is already complete — account type can no longer be changed");
   }
 
@@ -471,14 +536,35 @@ export const _setProfessionalRole = async (
     );
   }
 
-  const updated = await prisma.account.update({
-    where: { id: accountId },
-    data: { role },
-    include: {
-      lawyerProfile: true,
-      firmProfile: true,
-      practiceAreaLinks: { include: { practiceArea: true } },
-    },
+  // Switching away from a role whose verification is already in motion is a
+  // support matter, not a back button — an admin may be looking at it, and a
+  // disputed SCN must not be dropped by one party walking away from it.
+  const existing: any = account.lawyerProfile || account.firmProfile;
+  if (existing && existing.verificationStatus !== INITIAL_VERIFICATION_STATUS) {
+    throw conflict(
+      "Your verification is already in progress. Contact support to change your account type."
+    );
+  }
+
+  const updated = await prisma.$transaction(async (tx) => {
+    // Discard the half-built satellite so the switch is clean. For a lawyer
+    // this also releases the SCN claim — otherwise the number stays reserved by
+    // someone who decided to register as a firm instead.
+    if (account.lawyerProfile) {
+      await tx.lawyerProfile.delete({ where: { accountId } });
+    }
+    if (account.firmProfile) {
+      await tx.firmProfile.delete({ where: { accountId } });
+    }
+    return tx.account.update({
+      where: { id: accountId },
+      data: { role },
+      include: {
+        lawyerProfile: true,
+        firmProfile: true,
+        practiceAreaLinks: { include: { practiceArea: true } },
+      },
+    });
   });
 
   await invalidateAccountCache(account.authUserId);
@@ -500,7 +586,12 @@ export const _setupLawyer = async (
   if (account.role !== "PENDING_PROFESSIONAL" && account.role !== "LAWYER") {
     throw forbidden("Account is not awaiting professional setup");
   }
-  if (account.lawyerProfile) throw conflict("Lawyer profile already exists");
+  // The satellite is created back at the bar-details step, so its presence is
+  // expected here — `profileCompletedAt` is what says the wizard is finished.
+  if (account.profileCompletedAt) throw conflict("Profile setup is already complete");
+  if (!account.lawyerProfile) {
+    throw badRequest("Submit your bar details before completing your profile");
+  }
 
   const practiceAreaIds = body.practiceAreas.map((a) => a.practiceAreaId);
   // The account is still PENDING_PROFESSIONAL here — the limit that matters is
@@ -530,20 +621,16 @@ export const _setupLawyer = async (
         phone: body.whatsappNumber,
         locationCity: body.locationCity,
         locationCountry: body.locationCountry || "Nigeria",
+        profileCompletedAt: new Date(),
       },
     });
-    await tx.lawyerProfile.create({
-      data: {
-        accountId,
-        callToBarYear: body.callToBarYear,
-        feeRangeMin,
-        feeRangeMax,
-        // Starts unverified — the wizard's last step tells them their profile is
-        // "under review", and it has to actually be true. Uploading the required
-        // document moves this to `under_review`, which is what the admin KYC
-        // queue filters on. See INITIAL_VERIFICATION_STATUS.
-        verificationStatus: INITIAL_VERIFICATION_STATUS,
-      },
+    // Only the fee rollup is set here. `scn`, `barFullName`, `callToBarYear`,
+    // `nbaBranch` and `verificationStatus` were established at the bar-details
+    // step and NBA-checked there — setup must not overwrite them with
+    // client-supplied values at the end of the wizard.
+    await tx.lawyerProfile.update({
+      where: { accountId },
+      data: { feeRangeMin, feeRangeMax },
     });
     await tx.accountPracticeArea.createMany({
       data: normalizedAreas.map((a) => ({
@@ -599,6 +686,7 @@ export const _setupFirm = async (
   if (account.role !== "PENDING_PROFESSIONAL" && account.role !== "FIRM") {
     throw forbidden("Account is not awaiting professional setup");
   }
+  if (account.profileCompletedAt) throw conflict("Profile setup is already complete");
   if (account.firmProfile) throw conflict("Firm profile already exists");
 
   const practiceAreaIds = body.practiceAreas.map((a) => a.practiceAreaId);
@@ -624,6 +712,7 @@ export const _setupFirm = async (
         phone: body.whatsappNumber,
         locationCity: body.locationCity,
         locationCountry: body.locationCountry || "Nigeria",
+        profileCompletedAt: new Date(),
       },
     });
     await tx.firmProfile.create({
@@ -665,63 +754,15 @@ export const _setupFirm = async (
   });
 };
 
-const verificationStatusOf = (account: any): string =>
-  account?.lawyerProfile?.verificationStatus ||
-  account?.firmProfile?.verificationStatus ||
-  INITIAL_VERIFICATION_STATUS;
-
 /**
- * What the "Verify Your Professional Status" step and the profile badge need in
- * one call: the current status, which documents this role owes us, and what has
- * already been received.
+ * Store a verification document.
  *
- * `canSubmitForReview` is false once the account is already `under_review` or
- * decided — re-uploading after an admin has ruled shouldn't silently reopen the
- * case.
+ * Deliberately does NOT move `verificationStatus`. The wizard has an explicit
+ * "Complete Registration" step, and `POST /profile/me/application` owns the
+ * `pending -> under_review` transition; having an upload silently do it too
+ * would give the same state change two owners and let an application reach the
+ * admin queue before the identity check had run.
  */
-export const _getVerificationState = async (accountId: string): Promise<Response> => {
-  const account = await findAccountById(accountId);
-  if (!account) throw notFound("Account not found");
-  if (account.role !== "LAWYER" && account.role !== "FIRM") {
-    throw forbidden("Only LAWYER or FIRM accounts have a verification state");
-  }
-
-  const docs = await listVerificationDocuments(accountId);
-  const uploadedTypes = new Set(docs.map((d: any) => d.docType));
-  const required = requiredDocTypes(account.role);
-  const status = verificationStatusOf(account);
-
-  return response({
-    error: false,
-    message: "Verification state retrieved",
-    data: {
-      status,
-      requiredDocTypes: required.map((t) => ({
-        docType: t,
-        label: DOC_TYPE_LABELS[t] || t,
-        uploaded: uploadedTypes.has(t),
-      })),
-      optionalDocTypes: allowedDocTypes(account.role)
-        .filter((t) => !required.includes(t))
-        .map((t) => ({
-          docType: t,
-          label: DOC_TYPE_LABELS[t] || t,
-          uploaded: uploadedTypes.has(t),
-        })),
-      missingDocTypes: required.filter((t) => !uploadedTypes.has(t)),
-      uploaded: docs.map((d: any) => ({
-        id: d.id,
-        docType: d.docType,
-        label: DOC_TYPE_LABELS[d.docType] || d.docType,
-        status: d.status,
-        rejectionReason: d.rejectionReason,
-        createdAt: d.createdAt,
-      })),
-      canSubmitForReview: status === INITIAL_VERIFICATION_STATUS,
-    },
-  });
-};
-
 export const _uploadVerificationDocument = async (
   accountId: string,
   authUserId: string,
@@ -734,8 +775,24 @@ export const _uploadVerificationDocument = async (
   if (role !== "LAWYER" && role !== "FIRM") {
     throw forbidden("Only LAWYER or FIRM accounts can upload verification documents");
   }
+  if (docType === DISPUTE_EVIDENCE_DOC_TYPE) {
+    // Dispute evidence is filed against a dispute, not against the account's own
+    // application, and goes through the dispute endpoint so it gets linked.
+    throw badRequest("Upload dispute evidence through your dispute, not here");
+  }
   if (!allowedDocTypes(role).includes(docType)) {
-    throw badRequest(`${role === "FIRM" ? "Firm" : "Lawyer"} accounts cannot upload docType "${docType}"`);
+    throw badRequest(
+      `${role === "FIRM" ? "Firm" : "Lawyer"} accounts cannot upload docType "${docType}"`
+    );
+  }
+
+  const account = await findAccountById(accountId);
+  if (!account) throw notFound("Account not found");
+
+  const profile: any = account.lawyerProfile || account.firmProfile;
+  const status = profile?.verificationStatus || INITIAL_VERIFICATION_STATUS;
+  if (DECIDED_STATUSES.includes(status)) {
+    throw conflict("Your verification has already been reviewed");
   }
 
   const { key } = await uploadToR2({
@@ -747,46 +804,20 @@ export const _uploadVerificationDocument = async (
     allowPdf: true,
   });
 
-  const doc = await prisma.verificationDocument.create({
-    data: {
-      accountId,
-      docType,
-      s3Key: key,
-      status: "pending",
-    },
-  });
+  const doc = await createVerificationDocument({ accountId, docType, s3Key: key });
 
-  // The transition that actually matters: once every required document for the
-  // role is in, the profile moves `pending` -> `under_review`, which is the only
-  // status `listKycQueue` selects. Without this the upload is a dead end — the
-  // wizard promises a review nobody is queued for.
-  //
-  // Only ever moves forward from `pending`. An account an admin has already
-  // ruled on is not reopened by an upload; that's an admin decision.
-  const account = await findAccountById(accountId);
-  const status = verificationStatusOf(account);
-  let submittedForReview = false;
-
-  if (status === INITIAL_VERIFICATION_STATUS) {
-    const docs = await listVerificationDocuments(accountId);
-    const uploadedTypes = new Set(docs.map((d: any) => d.docType));
-    const missing = requiredDocTypes(role).filter((t) => !uploadedTypes.has(t));
-    if (missing.length === 0) {
-      await setVerificationStatus(accountId, UNDER_REVIEW_STATUS);
-      submittedForReview = true;
-    }
-  }
+  const docs = await listVerificationDocuments(accountId);
+  const uploaded = new Set(docs.map((d: any) => d.docType));
+  const missingDocTypes = requiredDocTypes(role).filter((t) => !uploaded.has(t));
 
   await invalidateAccountCache(authUserId);
   return response({
     error: false,
-    message: submittedForReview
-      ? "Document uploaded — your profile has been submitted for review"
-      : "Verification document uploaded",
+    message: "Verification document uploaded",
     data: {
       document: doc,
-      verificationStatus: submittedForReview ? UNDER_REVIEW_STATUS : status,
-      submittedForReview,
+      verificationStatus: status,
+      missingDocTypes,
     },
   });
 };

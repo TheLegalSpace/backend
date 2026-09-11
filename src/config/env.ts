@@ -44,6 +44,27 @@ export const env = {
   vapidPrivateKey: process.env.VAPID_PRIVATE_KEY || "",
   vapidSubject: process.env.VAPID_SUBJECT || "mailto:support@thelegalspace.com",
 
+  // Professional identity verification (lawyer bar details + NIN).
+  //
+  // Both checks call metered third-party providers, so both are flag-gated and
+  // OFF by default. While off, the endpoints still run every check that needs no
+  // provider — SCN format, and crucially "is this SCN already registered", which
+  // is what drives the dispute branch — and report the provider result as
+  // `unchecked` rather than faking a match. A green "NBA record matched" that
+  // means nothing is the one outcome that lets an impostor through the screen
+  // built to stop them.
+  nbaVerificationEnabled: process.env.NBA_VERIFICATION_ENABLED === "true",
+  ninVerificationEnabled: process.env.NIN_VERIFICATION_ENABLED === "true",
+  identityProviderBase: process.env.IDENTITY_PROVIDER_BASE || "",
+  identityProviderKey: process.env.IDENTITY_PROVIDER_KEY || "",
+
+  // reCAPTCHA on the professional signup form. Off by default so local and
+  // preview environments don't need a key pair.
+  captchaEnabled: process.env.CAPTCHA_ENABLED === "true",
+  captchaSecret: process.env.RECAPTCHA_SECRET || "",
+  captchaVerifyUrl:
+    process.env.RECAPTCHA_VERIFY_URL || "https://www.google.com/recaptcha/api/siteverify",
+
   // KYC enforcement. New LAWYER/FIRM accounts finish setup as `pending` and move
   // to `under_review` once their required document is uploaded, so the admin
   // queue is populated and the "under review" copy is honest. Enforcement is

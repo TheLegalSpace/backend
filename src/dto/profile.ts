@@ -84,14 +84,10 @@ export const professionalRoleSchema = {
 export const lawyerSetupSchema = {
   body: {
     type: "object",
-    required: [
-      "firstName",
-      "lastName",
-      "whatsappNumber",
-      "callToBarYear",
-      "locationCity",
-      "practiceAreas",
-    ],
+    // `callToBarYear` is NOT required here: it is captured and NBA-checked at
+    // the bar-details step, and setup must not overwrite it with a value typed
+    // again at the end of the wizard. Accepted and ignored if sent.
+    required: ["firstName", "lastName", "whatsappNumber", "locationCity", "practiceAreas"],
     properties: {
       firstName: { type: "string", minLength: 1, maxLength: 80 },
       lastName: { type: "string", minLength: 1, maxLength: 80 },
@@ -167,5 +163,53 @@ export const paginationQuery = {
   properties: {
     page: { type: "integer", default: 1, minimum: 1 },
     limit: { type: "integer", default: 20, minimum: 1, maximum: 100 },
+  },
+};
+
+// --- Professional identity verification (lawyer signup wizard) --------------
+
+export const barDetailsSchema = {
+  body: {
+    type: "object",
+    required: ["fullName", "scn", "callToBarYear"],
+    properties: {
+      // Name exactly as called to bar. The NBA and NIN checks compare against
+      // this, order-sensitively, which is what the screen copy promises.
+      fullName: { type: "string", minLength: 3, maxLength: 160 },
+      scn: { type: "string", minLength: 4, maxLength: 40 },
+      callToBarYear: { type: "integer", minimum: 1900, maximum: 2100 },
+      nbaBranch: { type: "string", maxLength: 100 },
+    },
+  },
+};
+
+export const scnDisputeSchema = {
+  body: {
+    type: "object",
+    required: ["scn"],
+    properties: {
+      scn: { type: "string", minLength: 4, maxLength: 40 },
+      statement: { type: "string", maxLength: 2000 },
+    },
+  },
+};
+
+export const identityVerifySchema = {
+  body: {
+    type: "object",
+    required: ["nin", "consent"],
+    properties: {
+      // Passed to the provider and never stored — see logic/verification.ts.
+      nin: { type: "string", minLength: 11, maxLength: 11 },
+      consent: { type: "boolean" },
+    },
+  },
+};
+
+export const disputeIdParamSchema = {
+  params: {
+    type: "object",
+    required: ["id"],
+    properties: { id: { type: "string", format: "uuid" } },
   },
 };
