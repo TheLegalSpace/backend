@@ -15,6 +15,18 @@ import { env, isProd } from "../config/env";
  * nothing is sent and the message is logged, so local and preview environments
  * need no mail account. The one place that is *not* allowed to silently no-op is
  * production — see `sendEmail`.
+ *
+ * **Two transports, and the reason is the host, not preference.** Render's free
+ * tier blocks outbound traffic to SMTP ports 25/465/587 (since 2025-09-26), so
+ * nodemailer cannot connect from there at all — it fails `ETIMEDOUT` on `CONN`
+ * after the connection timeout, which also makes every signup hang ~12s before
+ * erroring. Brevo's HTTP API is an ordinary HTTPS request on 443, which is not
+ * blocked.
+ *
+ * So: if `BREVO_API_KEY` is set we post over HTTPS; otherwise we fall back to
+ * SMTP. SMTP is kept rather than deleted because it still works locally, on paid
+ * Render instances, and with any other provider — this is a routing decision, not
+ * a migration.
  */
 
 let transporter: Transporter | null = null;
@@ -55,6 +67,47 @@ export interface SendEmailInput {
 const redactCodes = (subject: string) => subject.replace(/\d{4,}/g, "******");
 
 /**
+ * Deliver via Brevo's transactional HTTP API (HTTPS/443).
+ *
+ * Preferred wherever it is available, because it sidesteps the SMTP port block
+ * on Render's free tier entirely and reports failures as a status code and a
+ * JSON body rather than a socket timeout.
+ */
+const sendViaBrevoApi = async ({ to, subject, html, text }: SendEmailInput): Promise<void> => {
+  const res = await fetch("https://api.brevo.com/v3/smtp/email", {
+    method: "POST",
+    headers: {
+      "api-key": env.brevoApiKey,
+      "content-type": "application/json",
+      accept: "application/json",
+    },
+    body: JSON.stringify({
+      sender: { name: env.emailFromName, email: env.emailFrom },
+      to: [{ email: to }],
+      subject,
+      htmlContent: html,
+      textContent: text,
+    }),
+    // Without this a hung upstream would hold the signup request open until the
+    // client gives up, which is indistinguishable from a wrong code to the user.
+    signal: AbortSignal.timeout(15_000),
+  });
+
+  const body: any = await res.json().catch(() => null);
+  if (!res.ok) {
+    console.error(`[email] brevo api send FAILED to=${to} subject="${redactCodes(subject)}"`, {
+      status: res.status,
+      code: body?.code,
+      message: body?.message,
+    });
+    throw new Error("Could not send the email. Please try again.");
+  }
+  console.log(
+    `[email] sent via brevo api to=${to} subject="${redactCodes(subject)}" messageId=${body?.messageId}`
+  );
+};
+
+/**
  * Send one transactional email.
  *
  * Resolves on success. Throws only when the caller must not pretend the mail
@@ -74,8 +127,12 @@ export const sendEmail = async ({ to, subject, html, text }: SendEmailInput): Pr
     return;
   }
 
+  // HTTPS beats SMTP wherever both are available — see the note on Render's
+  // SMTP port block above.
+  if (env.brevoApiKey) return sendViaBrevoApi({ to, subject, html, text });
+
   if (!env.smtpUser || !env.smtpPass) {
-    console.error("[email] SMTP_ENABLED=true but SMTP_USER/SMTP_PASS are unset");
+    console.error("[email] SMTP_ENABLED=true but no BREVO_API_KEY and no SMTP_USER/SMTP_PASS");
     throw new Error("Email delivery is not configured");
   }
 
@@ -111,6 +168,13 @@ export const sendEmail = async ({ to, subject, html, text }: SendEmailInput): Pr
 export const verifyEmailTransport = async (): Promise<void> => {
   if (!env.smtpEnabled) {
     console.log("[email] SMTP disabled — auth codes will be logged, not sent");
+    return;
+  }
+  // The HTTP transport has no connection to pre-open, and probing SMTP anyway
+  // would stall boot for the connection timeout and log a failure for a
+  // transport we are not going to use.
+  if (env.brevoApiKey) {
+    console.log(`[email] using Brevo HTTP API from=${env.emailFrom} (SMTP not used)`);
     return;
   }
   try {
