@@ -36,6 +36,26 @@ export const env = {
   emailFrom: process.env.EMAIL_FROM || "notifications@thelegalspace.com",
   emailFromName: process.env.EMAIL_FROM_NAME || "The Legal Space",
 
+  // Outbound SMTP (nodemailer). We send the signup and password-reset codes
+  // ourselves rather than letting Supabase's built-in mailer do it, because that
+  // mailer is capped at *2 emails per hour project-wide* — two signups an hour
+  // across the whole platform, with password resets drawing from the same
+  // bucket. Supabase documents it as a testing-only sender.
+  //
+  // Off by default: with SMTP_ENABLED=false nothing is sent and the code is
+  // logged instead, so local and preview environments need no mail account.
+  // Never allowed to no-op in production — see services/email.ts.
+  smtpEnabled: process.env.SMTP_ENABLED === "true",
+  smtpHost: process.env.SMTP_HOST || "smtp-relay.brevo.com",
+  smtpPort: parseInt(process.env.SMTP_PORT || "587", 10),
+  // 587 is STARTTLS (secure=false, upgraded after connect); 465 is implicit TLS.
+  // Defaulted off the port so a port change doesn't silently break TLS.
+  smtpSecure: process.env.SMTP_SECURE
+    ? process.env.SMTP_SECURE === "true"
+    : parseInt(process.env.SMTP_PORT || "587", 10) === 465,
+  smtpUser: process.env.SMTP_USER || "",
+  smtpPass: process.env.SMTP_PASS || "",
+
   geminiApiKey: process.env.GEMINI_API_KEY || "",
 
   // Web Push (VAPID). Private key stays server-side; the public key is embedded

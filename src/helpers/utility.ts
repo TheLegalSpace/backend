@@ -36,4 +36,5 @@ export const conflict = (msg = "Conflict") => new HttpError(msg, 409);
 export const badRequest = (msg = "Bad request") => new HttpError(msg, 400);
 export const paymentRequired = (msg = "Payment required") => new HttpError(msg, 402);
 export const gone = (msg = "Gone") => new HttpError(msg, 410);
+export const tooManyRequests = (msg = "Too many requests") => new HttpError(msg, 429);
 export const serviceUnavailable = (msg = "Service unavailable") => new HttpError(msg, 503);

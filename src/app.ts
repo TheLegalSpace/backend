@@ -7,6 +7,7 @@ import swaggerUi from "@fastify/swagger-ui";
 import { env, isProd } from "./config/env";
 import { connectDatabase, disconnectDatabase } from "./config/database";
 import { registerRateLimiter } from "./middleware/rateLimiter";
+import { verifyEmailTransport } from "./services/email";
 import { initRealtime } from "./realtime/gateway";
 import { startStaleRequestJob } from "./jobs/staleRequests";
 import { startTopAccountsJob } from "./jobs/topAccounts";
@@ -146,6 +147,11 @@ const buildServer = async () => {
 const start = async () => {
   const app = await buildServer();
   await connectDatabase();
+
+  // Signup and password-reset codes go out over our own SMTP now, so bad
+  // credentials should surface at boot rather than on someone's first signup.
+  // Never throws — a mail provider having a bad minute must not stop the API.
+  await verifyEmailTransport();
 
   initRealtime(app.server);
 
