@@ -1,5 +1,6 @@
 import { FastifyInstance } from "fastify";
 import { authHook } from "../middleware/auth";
+import { requireVerifiedAccess } from "../middleware/requireVerifiedAccess";
 import { requireConversationParticipant } from "../middleware/requireConversationParticipant";
 import {
   list,
@@ -21,6 +22,8 @@ const idParam = {
 
 export default async function conversationRoutes(fastify: FastifyInstance) {
   fastify.addHook("onRequest", authHook);
+  // Unverified lawyers cannot reach the platform — see requireVerifiedAccess.
+  fastify.addHook("preHandler", requireVerifiedAccess);
 
   fastify.get("/", { schema: { querystring: paginationQuery } }, list);
   fastify.get(

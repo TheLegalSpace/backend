@@ -32,12 +32,13 @@ import {
 } from "../config/membership";
 import {
   INITIAL_VERIFICATION_STATUS,
-  DECIDED_STATUSES,
+  FINAL_STATUSES,
   DISPUTE_EVIDENCE_DOC_TYPE,
   allowedDocTypes,
   requiredDocTypes,
 } from "../config/verification";
 import { listVerificationDocuments, createVerificationDocument } from "../dao/verification";
+import { onboardingState } from "../services/onboarding";
 import { redis } from "../config/redis";
 import {
   uploadToR2,
@@ -72,63 +73,6 @@ const enrichProfile = async (
   // are readable for any lawyer whose name you can guess, and the matching
   // cooldown protects nothing.
   return applyFeeVisibility(enriched, viewerId, viewerRole);
-};
-
-/**
- * Where a professional is in the signup wizard, as a single field.
- *
- * `nextStep` is the screen the client should resume on. Derived rather than
- * stored so it can never drift from the rows it describes.
- */
-const onboardingState = (account: any) => {
-  const profile: any = account.lawyerProfile || account.firmProfile;
-  const verificationStatus = profile?.verificationStatus ?? null;
-  const hasBarDetails = Boolean(account.lawyerProfile?.scn);
-  const identityChecked = Boolean(account.lawyerProfile?.identityCheckStatus);
-  const submitted = Boolean(profile?.applicationSubmittedAt);
-  const profileComplete = Boolean(account.profileCompletedAt);
-  const isProfessionalTier = account.membershipTier === "professional";
-
-  // A firm has no bar-details or NIN step yet, and its satellite is still
-  // created at setup — so its wizard is the older shape: plan, then setup.
-  const isFirm = account.role === "FIRM";
-
-  let nextStep = "complete";
-  if (isFirm) {
-    if (!isProfessionalTier && !profileComplete) nextStep = "select_plan";
-    else if (!profileComplete) nextStep = "profile_setup";
-    else if (!submitted) nextStep = "submit_application";
-    else if (verificationStatus === "under_review") nextStep = "await_review";
-    else if (verificationStatus === "rejected") nextStep = "rejected";
-    return {
-      nextStep,
-      verificationStatus,
-      hasBarDetails: false,
-      identityChecked: false,
-      applicationSubmitted: submitted,
-      profileComplete,
-      disputeOpen: false,
-    };
-  }
-
-  if (!hasBarDetails) nextStep = "bar_details";
-  else if (!identityChecked) nextStep = "identity";
-  else if (!submitted) nextStep = "submit_application";
-  else if (verificationStatus === "under_review") nextStep = "await_review";
-  else if (verificationStatus === "disputed") nextStep = "await_dispute";
-  else if (verificationStatus === "rejected") nextStep = "rejected";
-  else if (!isProfessionalTier) nextStep = "select_plan";
-  else if (!profileComplete) nextStep = "profile_setup";
-
-  return {
-    nextStep,
-    verificationStatus,
-    hasBarDetails,
-    identityChecked,
-    applicationSubmitted: submitted,
-    profileComplete,
-    disputeOpen: Boolean((profile?.verificationFlags as any)?.disputeOpen),
-  };
 };
 
 export const _getMe = async (accountId: string): Promise<Response> => {
@@ -791,8 +735,10 @@ export const _uploadVerificationDocument = async (
 
   const profile: any = account.lawyerProfile || account.firmProfile;
   const status = profile?.verificationStatus || INITIAL_VERIFICATION_STATUS;
-  if (DECIDED_STATUSES.includes(status)) {
-    throw conflict("Your verification has already been reviewed");
+  // `rejected` deliberately passes: re-uploading a clearer scan is the whole
+  // point of letting a rejected application be retried.
+  if (FINAL_STATUSES.includes(status)) {
+    throw conflict("Your verification has already been approved");
   }
 
   const { key } = await uploadToR2({

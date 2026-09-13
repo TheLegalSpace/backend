@@ -1,11 +1,14 @@
 import { FastifyInstance } from "fastify";
 import { authHook } from "../middleware/auth";
+import { requireVerifiedAccess } from "../middleware/requireVerifiedAccess";
 import { stricter } from "../middleware/rateLimiter";
 import { follow, unfollow, listFollowing, listFollowers } from "../controller/follow";
 import { paginationQuery } from "../dto/profile";
 
 export default async function followRoutes(fastify: FastifyInstance) {
   fastify.addHook("onRequest", authHook);
+  // Unverified lawyers cannot reach the platform — see requireVerifiedAccess.
+  fastify.addHook("preHandler", requireVerifiedAccess);
 
   fastify.post(
     "/:accountId",

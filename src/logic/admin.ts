@@ -13,6 +13,12 @@ import {
 import { signedFileUrl } from "../services/storage";
 import { paginate, buildPagination } from "../helpers/pagination";
 import { dispatchNotification } from "../services/notification";
+import { sendEmail } from "../services/email";
+import {
+  verificationApprovedEmail,
+  verificationRejectedEmail,
+} from "../services/emailTemplates";
+import { invalidateAccountCache } from "../middleware/auth";
 import {
   listServiceRequests,
   findServiceRequestById,
@@ -116,11 +122,45 @@ export const _kycQueue = async (page: number, limit: number): Promise<Response> 
   });
 };
 
+/**
+ * The account cache is the reason this exists rather than being inlined.
+ *
+ * `authHook` caches the account *and its satellite profiles* in Redis for 15
+ * minutes, and `requireVerifiedAccess` reads `verificationStatus` off that cached
+ * copy. Change the row without dropping the key and the decision keeps being made
+ * against a snapshot up to a quarter of an hour old: the approval email arrives,
+ * the lawyer clicks through, and they are still locked out with no explanation —
+ * then it fixes itself, which is the hardest kind of bug to chase.
+ */
+const refreshAccountSession = async (accountId: string) => {
+  const account = await prisma.account.findUnique({
+    where: { id: accountId },
+    select: { authUserId: true },
+  });
+  if (account?.authUserId) await invalidateAccountCache(account.authUserId);
+};
+
+/** Best-effort — a mail failure must never fail the admin's decision. */
+const sendVerificationEmail = async (accountId: string, build: (name: string) => any) => {
+  try {
+    const account = await prisma.account.findUnique({
+      where: { id: accountId },
+      select: { email: true, fullName: true },
+    });
+    if (!account?.email) return;
+    const body = build(account.fullName?.split(" ")[0] || "there");
+    await sendEmail({ to: account.email, ...body });
+  } catch (err) {
+    console.error("[kyc] verification email failed:", (err as Error).message);
+  }
+};
+
 export const _approveKyc = async (
   adminId: string,
   accountId: string
 ): Promise<Response> => {
   const result = await setVerificationStatus(accountId, "verified");
+  await refreshAccountSession(accountId);
   await recordAuditLog({
     adminAccountId: adminId,
     action: "kyc.approve",
@@ -132,6 +172,9 @@ export const _approveKyc = async (
     type: "verification_update",
     payload: { status: "verified" },
   });
+  // The email, not the notification, is what actually reaches them: an applicant
+  // awaiting review can't open any part of the app to read a bell badge.
+  await sendVerificationEmail(accountId, verificationApprovedEmail);
   return response({ error: false, message: "KYC approved", data: result });
 };
 
@@ -140,7 +183,14 @@ export const _rejectKyc = async (
   accountId: string,
   reason: string
 ): Promise<Response> => {
-  const result = await setVerificationStatus(accountId, "rejected");
+  // Rejection is a retryable state, so it hands back what a retry needs: the
+  // reason to show on the screen, and the two NIN attempts the applicant spent
+  // getting here.
+  const result = await setVerificationStatus(accountId, "rejected", {
+    rejectionReason: reason,
+    resetIdentityAttempts: true,
+  });
+  await refreshAccountSession(accountId);
   await recordAuditLog({
     adminAccountId: adminId,
     action: "kyc.reject",
@@ -153,6 +203,7 @@ export const _rejectKyc = async (
     type: "verification_update",
     payload: { status: "rejected", reason },
   });
+  await sendVerificationEmail(accountId, (name) => verificationRejectedEmail(name, reason));
   return response({ error: false, message: "KYC rejected", data: result });
 };
 

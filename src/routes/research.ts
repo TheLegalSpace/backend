@@ -1,5 +1,6 @@
 import { FastifyInstance } from "fastify";
 import { authHook } from "../middleware/auth";
+import { requireVerifiedAccess } from "../middleware/requireVerifiedAccess";
 import { requireRole } from "../middleware/requireRole";
 import { requireProfessional } from "../middleware/requireProfessional";
 import { stricter } from "../middleware/rateLimiter";
@@ -20,6 +21,8 @@ const idParam = {
 
 export default async function researchRoutes(fastify: FastifyInstance) {
   fastify.addHook("onRequest", authHook);
+  // Unverified lawyers cannot reach the platform — see requireVerifiedAccess.
+  fastify.addHook("preHandler", requireVerifiedAccess);
   fastify.addHook("preHandler", requireRole("LAWYER", "FIRM"));
   // TLS Research is a Professional-membership feature (see the plan comparison cards).
   fastify.addHook("preHandler", requireProfessional);

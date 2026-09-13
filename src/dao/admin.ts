@@ -45,13 +45,32 @@ export const setAccountStatus = async (id: string, status: string) => {
 
 export const setVerificationStatus = async (
   accountId: string,
-  status: string
+  status: string,
+  extra: { rejectionReason?: string | null; resetIdentityAttempts?: boolean } = {}
 ) => {
   const lp = await prisma.lawyerProfile.findUnique({ where: { accountId } });
   if (lp) {
+    const flags: any = (lp.verificationFlags as any) || {};
     return prisma.lawyerProfile.update({
       where: { accountId },
-      data: { verificationStatus: status },
+      data: {
+        verificationStatus: status,
+        verificationFlags: {
+          ...flags,
+          adminApproved: status === "verified",
+          // Kept on the profile so the retry screen can say what to fix.
+          // Cleared on approval — a stale reason under a verified badge reads
+          // as a live problem.
+          rejectionReason: status === "rejected" ? extra.rejectionReason ?? null : null,
+          rejectedAt: status === "rejected" ? new Date().toISOString() : null,
+        },
+        // A rejected lawyer is being asked to try again, and the NIN check
+        // allows only two paid lookups. Without this reset, an applicant
+        // rejected over an identity mismatch is sent back to a step that
+        // refuses them before it ever reaches the provider — a dead end inside
+        // the path that exists to avoid dead ends.
+        ...(extra.resetIdentityAttempts ? { identityCheckAttempts: 0 } : {}),
+      },
     });
   }
   return prisma.firmProfile.update({

@@ -1,5 +1,6 @@
 import { FastifyInstance } from "fastify";
 import { authHook } from "../middleware/auth";
+import { requireVerifiedAccess } from "../middleware/requireVerifiedAccess";
 import { requireRole } from "../middleware/requireRole";
 import { stricter } from "../middleware/rateLimiter";
 import {
@@ -42,6 +43,8 @@ const partialIntakeBody = {
 
 export default async function matchmakingRoutes(fastify: FastifyInstance) {
   fastify.addHook("onRequest", authHook);
+  // Unverified lawyers cannot reach the platform — see requireVerifiedAccess.
+  fastify.addHook("preHandler", requireVerifiedAccess);
   fastify.addHook("preHandler", requireRole("USER"));
 
   fastify.post(

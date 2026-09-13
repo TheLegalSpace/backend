@@ -1,5 +1,6 @@
 import { FastifyInstance } from "fastify";
 import { authHook } from "../middleware/auth";
+import { requireVerifiedAccess } from "../middleware/requireVerifiedAccess";
 import {
   list,
   unreadCount,
@@ -13,6 +14,8 @@ import { subscribePushSchema, unsubscribePushSchema } from "../dto/notification"
 
 export default async function notificationRoutes(fastify: FastifyInstance) {
   fastify.addHook("onRequest", authHook);
+  // Unverified lawyers cannot reach the platform — see requireVerifiedAccess.
+  fastify.addHook("preHandler", requireVerifiedAccess);
 
   fastify.get("/", { schema: { querystring: paginationQuery } }, list);
   fastify.get("/unread-count", unreadCount);

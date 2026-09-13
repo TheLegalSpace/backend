@@ -1,5 +1,6 @@
 import { FastifyInstance } from "fastify";
 import { authHook } from "../middleware/auth";
+import { requireVerifiedAccess } from "../middleware/requireVerifiedAccess";
 import { requireRole } from "../middleware/requireRole";
 import {
   createInquiry,
@@ -33,6 +34,8 @@ const inquiryBody = {
 
 export default async function serviceRoutes(fastify: FastifyInstance) {
   fastify.addHook("onRequest", authHook);
+  // Unverified lawyers cannot reach the platform — see requireVerifiedAccess.
+  fastify.addHook("preHandler", requireVerifiedAccess);
   // TLS Services (inquiries + event promotion) are open to all account types —
   // clients, lawyers and firms can all host/promote events and submit inquiries.
   fastify.addHook("preHandler", requireRole("USER", "LAWYER", "FIRM"));

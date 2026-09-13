@@ -1,5 +1,6 @@
 import { FastifyInstance } from "fastify";
 import { authHook } from "../middleware/auth";
+import { requireVerifiedAccess } from "../middleware/requireVerifiedAccess";
 import { requireRole } from "../middleware/requireRole";
 import { requireVerified } from "../middleware/requireVerified";
 import { requireProfessional } from "../middleware/requireProfessional";
@@ -30,6 +31,8 @@ const listQuery = {
 
 export default async function leadRoutes(fastify: FastifyInstance) {
   fastify.addHook("onRequest", authHook);
+  // Unverified lawyers cannot reach the platform — see requireVerifiedAccess.
+  fastify.addHook("preHandler", requireVerifiedAccess);
   fastify.addHook("preHandler", requireRole("LAWYER", "FIRM"));
 
   fastify.get("/", { schema: { querystring: listQuery } }, listLeads);

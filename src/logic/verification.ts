@@ -11,7 +11,7 @@ import {
   INITIAL_VERIFICATION_STATUS,
   UNDER_REVIEW_STATUS,
   DISPUTED_STATUS,
-  DECIDED_STATUSES,
+  FINAL_STATUSES,
   DISPUTE_EVIDENCE_DOC_TYPE,
   DISPUTE_STATUSES,
   DOC_TYPE_LABELS,
@@ -175,10 +175,14 @@ export const _submitBarDetails = async (
 
   const existingOwn = await findLawyerProfileByAccount(accountId);
 
-  // Already decided by an admin — re-submitting bar details must not quietly
-  // reopen a case or move a verified lawyer's SCN.
-  if (existingOwn && DECIDED_STATUSES.includes(existingOwn.verificationStatus)) {
-    throw conflict("Your bar details have already been reviewed. Contact support to change them.");
+  // A verified lawyer's SCN is frozen — the approval was granted against that
+  // number. A rejected one may correct it: mistyping your own SCN is ordinary
+  // human error, and refusing the correction would strand a real lawyer over a
+  // typo. The abuse case — working through SCNs until one sticks — is handled by
+  // making it visible rather than by blocking it: every claim is recorded below,
+  // and every resubmission goes back through a human admin who can suspend.
+  if (existingOwn && FINAL_STATUSES.includes(existingOwn.verificationStatus)) {
+    throw conflict("Your bar details have already been approved. Contact support to change them.");
   }
   if (existingOwn && existingOwn.verificationStatus === UNDER_REVIEW_STATUS) {
     throw conflict("Your application is already under review.");
@@ -220,6 +224,19 @@ export const _submitBarDetails = async (
       ? DISPUTED_STATUS
       : INITIAL_VERIFICATION_STATUS;
 
+  // Every SCN this account has ever claimed, appended whenever the number
+  // changes. Correcting a typo is legitimate and stays cheap; working through
+  // numbers until one sticks is the thing we actually care about, and it shows
+  // up here as a list an admin can read. Blocking the change outright would
+  // have punished the typo and only slowed the fraud, since the SCN is free to
+  // re-type on a fresh signup.
+  const priorFlags: any = (existingOwn?.verificationFlags as any) || {};
+  const priorClaims: any[] = Array.isArray(priorFlags.scnClaims) ? priorFlags.scnClaims : [];
+  const scnClaims =
+    existingOwn && existingOwn.scn === scn
+      ? priorClaims
+      : [...priorClaims, { scn, at: new Date().toISOString() }];
+
   const profile = existingOwn
     ? await updateLawyerProfileByAccount(accountId, {
         scn,
@@ -229,6 +246,7 @@ export const _submitBarDetails = async (
         nbaCheckStatus: nba.status,
         nbaCheckedAt: new Date(),
         verificationStatus: nextStatus,
+        verificationFlags: { ...priorFlags, scnClaims },
       })
     : await createLawyerProfileForVerification({
         accountId,
@@ -238,6 +256,7 @@ export const _submitBarDetails = async (
         nbaBranch: body.nbaBranch ?? null,
         verificationStatus: INITIAL_VERIFICATION_STATUS,
         nbaCheckStatus: nba.status,
+        verificationFlags: { scnClaims },
       });
 
   // The satellite now exists, so the account is a LAWYER from here on.
@@ -441,8 +460,8 @@ export const _verifyIdentity = async (
 
   const profile = await findLawyerProfileByAccount(accountId);
   if (!profile) throw badRequest("Submit your bar details first");
-  if (DECIDED_STATUSES.includes(profile.verificationStatus)) {
-    throw conflict("Your verification has already been reviewed");
+  if (FINAL_STATUSES.includes(profile.verificationStatus)) {
+    throw conflict("Your identity has already been verified");
   }
   if (!body.consent) {
     throw badRequest("We need your consent to verify your identity");
@@ -551,8 +570,10 @@ export const _submitApplication = async (
     );
   }
 
-  if (DECIDED_STATUSES.includes(profile.verificationStatus)) {
-    throw conflict("Your application has already been reviewed");
+  // Only an approval closes this. A rejected applicant resubmits here after
+  // fixing whatever the rejection reason named.
+  if (FINAL_STATUSES.includes(profile.verificationStatus)) {
+    throw conflict("Your application has already been approved");
   }
   if (profile.verificationStatus === DISPUTED_STATUS) {
     throw conflict("Your application can't be submitted while the SCN dispute is being reviewed");
@@ -666,13 +687,22 @@ export const _getVerificationState = async (accountId: string): Promise<Response
       })),
       applicationSubmittedAt: profile?.applicationSubmittedAt ?? null,
       canSubmitApplication:
-        status === INITIAL_VERIFICATION_STATUS &&
+        // `rejected` counts: the application endpoint accepts a resubmission,
+        // and a flag here that disagreed with it would have the screen hiding
+        // a button the API would have honoured.
+        (status === INITIAL_VERIFICATION_STATUS || status === "rejected") &&
         missing.length === 0 &&
         // The identity step is lawyer-only until the firm flow is built.
         (account.role === "FIRM" ||
           (Boolean(identityStatus) &&
             !(identityStatus === "no_match" && (identityAttemptsRemaining ?? 0) > 0))),
       disputeOpen: Boolean(flags.disputeOpen),
+      // Rejection is retryable, so the screen has to be able to say what to
+      // change. Without this the applicant is told "not approved" and left to
+      // guess which of four steps was wrong.
+      rejectionReason: status === "rejected" ? flags.rejectionReason ?? null : null,
+      rejectedAt: status === "rejected" ? flags.rejectedAt ?? null : null,
+      canResubmit: status === "rejected",
     },
   });
 };
@@ -773,6 +803,19 @@ export const _resolveScnDispute = async (
       });
     }
   });
+
+  // Both sides just had their verification status rewritten, and
+  // `requireVerifiedAccess` reads it from the 15-minute account cache. Left
+  // stale, a ruling would take effect up to a quarter of an hour late — in both
+  // directions: an account this outcome locks out keeps working, and one it
+  // clears stays blocked.
+  for (const accountId of [dispute.claimantAccountId, dispute.existingAccountId]) {
+    const account = await prisma.account.findUnique({
+      where: { id: accountId },
+      select: { authUserId: true },
+    });
+    if (account?.authUserId) await invalidateAccountCache(account.authUserId);
+  }
 
   const resolved = await resolveDispute(disputeId, {
     status: outcome,

@@ -9,6 +9,7 @@ import {
   softDeleteAccount,
 } from "../dao/account";
 import { invalidateAccountCache } from "../middleware/auth";
+import { onboardingState } from "../services/onboarding";
 import { verifyCaptcha } from "../services/captcha";
 import { sendEmail } from "../services/email";
 import { verificationCodeEmail, passwordResetCodeEmail } from "../services/emailTemplates";
@@ -362,10 +363,19 @@ export const _login = async (body: LoginBody): Promise<Response> => {
     throw notFound("Account not found — please register first");
   }
   await invalidateAccountCache(authUserId);
+  // The same onboarding block `GET /profile/me` returns. A lawyer who is not yet
+  // verified logs in successfully and then finds the platform closed, so the
+  // login response has to say where to send them — otherwise the client's first
+  // move after a valid login is a request that 403s.
+  const isProfessional = account.role === "LAWYER" || account.role === "FIRM";
   return response({
     error: false,
     message: "Login successful",
-    data: { account, session },
+    data: {
+      account,
+      session,
+      onboarding: isProfessional ? onboardingState(account) : null,
+    },
   });
 };
 

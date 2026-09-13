@@ -35,6 +35,12 @@ export const env = {
   brevoApiKey: process.env.BREVO_API_KEY || "",
   emailFrom: process.env.EMAIL_FROM || "notifications@thelegalspace.com",
   emailFromName: process.env.EMAIL_FROM_NAME || "The Legal Space",
+  // Logo shown in transactional emails. Must be a PUBLIC https URL — mail clients
+  // fetch it from the recipient's machine when the message is opened, so anything
+  // behind auth, on localhost, or inlined as a data: URI (Gmail strips those)
+  // renders as a broken image. Defaults to the marketing site's own asset, which
+  // is already public and on our domain. Set empty to fall back to a text wordmark.
+  emailLogoUrl: process.env.EMAIL_LOGO_URL ?? "https://thelegalspace.com/logo-email.png",
 
   // Outbound SMTP (nodemailer). We send the signup and password-reset codes
   // ourselves rather than letting Supabase's built-in mailer do it, because that

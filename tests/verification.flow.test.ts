@@ -8,6 +8,7 @@ import {
 } from "../src/config/verification";
 
 const accountUpdate = vi.fn();
+const accountFindUnique = vi.fn(async () => ({ authUserId: "auth-1" }));
 const lawyerProfileUpdateMany = vi.fn();
 const transaction = vi.fn(async (fn: any) =>
   fn({ lawyerProfile: { updateMany: (...a: any[]) => lawyerProfileUpdateMany(...a) } })
@@ -36,7 +37,10 @@ const dispatchNotification = vi.fn();
 
 vi.mock("../src/config/database", () => ({
   prisma: {
-    account: { update: (...a: any[]) => accountUpdate(...a) },
+    account: {
+      update: (...a: any[]) => accountUpdate(...a),
+      findUnique: (...a: any[]) => accountFindUnique(...a),
+    },
     lawyerProfile: { updateMany: (...a: any[]) => lawyerProfileUpdateMany(...a) },
     $transaction: (fn: any) => transaction(fn),
   },
@@ -483,5 +487,79 @@ describe("firm path — the older wizard shape still reaches the queue", () => {
       statusCode: 400,
       message: expect.stringContaining("firm profile"),
     });
+  });
+});
+
+describe("a rejected application can be retried", () => {
+  // Rejection is a retryable state, not a terminal one — most rejections are
+  // clerical (a blurry certificate, the wrong file, a mistyped number), and the
+  // terminal control lives elsewhere, on Account.status via admin suspension.
+  // Each of these was a 409 dead end before.
+  const rejected = (over: any = {}) =>
+    profile({ verificationStatus: "rejected", identityCheckStatus: "matched", ...over });
+
+  it("accepts a resubmitted application", async () => {
+    findLawyerProfileByAccount.mockResolvedValue(rejected());
+    findSatelliteProfile.mockResolvedValue(rejected());
+    const res = await _submitApplication(LAWYER, AUTH);
+    expect(res.data.verificationStatus).toBe(UNDER_REVIEW_STATUS);
+  });
+
+  it("lets the identity check run again", async () => {
+    // Paired with the attempt reset on rejection — without both, "try again"
+    // sends them to a step that refuses them before reaching the provider.
+    findLawyerProfileByAccount.mockResolvedValue(
+      rejected({ identityCheckStatus: "no_match", identityCheckAttempts: 0 })
+    );
+    const res = await _verifyIdentity(LAWYER, AUTH, { nin: "22102921031", consent: true });
+    expect(res.data.outcome).toBeDefined();
+    expect(checkNin).toHaveBeenCalled();
+  });
+
+  it("lets a corrected SCN through — mistyping your own number is human error", async () => {
+    findAccountById.mockResolvedValue(account({ role: "LAWYER" }));
+    findLawyerProfileByAccount.mockResolvedValue(rejected({ scn: "SCN/2016/04821" }));
+    const res = await _submitBarDetails(LAWYER, AUTH, {
+      scn: "SCN/2016/04822",
+      fullName: "Oluwaseun Ezekiel Marian",
+      callToBarYear: 2019,
+    } as any);
+    expect(res.data.outcome).toBeDefined();
+    expect(updateLawyerProfileByAccount).toHaveBeenCalled();
+  });
+
+  it("records every SCN the account has claimed, so hopping is visible to an admin", async () => {
+    // The abuse case is handled by making it legible rather than by blocking the
+    // correction — blocking would punish the typo and only slow the fraud.
+    findAccountById.mockResolvedValue(account({ role: "LAWYER" }));
+    findLawyerProfileByAccount.mockResolvedValue(
+      rejected({ scn: "SCN/2016/04821", verificationFlags: { scnClaims: [{ scn: "SCN/2016/04821", at: "x" }] } })
+    );
+    await _submitBarDetails(LAWYER, AUTH, {
+      scn: "SCN/2016/04899",
+      fullName: "Oluwaseun Ezekiel Marian",
+      callToBarYear: 2019,
+    } as any);
+    const flags = updateLawyerProfileByAccount.mock.calls[0][1].verificationFlags;
+    expect(flags.scnClaims).toHaveLength(2);
+    expect(flags.scnClaims[1].scn).toBe("SCN/2016/04899");
+  });
+
+  it("still freezes a verified lawyer's SCN", async () => {
+    findAccountById.mockResolvedValue(account({ role: "LAWYER" }));
+    findLawyerProfileByAccount.mockResolvedValue(profile({ verificationStatus: "verified" }));
+    await expect(
+      _submitBarDetails(LAWYER, AUTH, {
+        scn: "SCN/2016/04899",
+        fullName: "Oluwaseun Ezekiel Marian",
+        callToBarYear: 2019,
+      } as any)
+    ).rejects.toMatchObject({ statusCode: 409 });
+  });
+
+  it("still refuses to resubmit an approved application", async () => {
+    findLawyerProfileByAccount.mockResolvedValue(profile({ verificationStatus: "verified" }));
+    findSatelliteProfile.mockResolvedValue(profile({ verificationStatus: "verified" }));
+    await expect(_submitApplication(LAWYER, AUTH)).rejects.toMatchObject({ statusCode: 409 });
   });
 });

@@ -20,9 +20,24 @@ export const INITIAL_VERIFICATION_STATUS = "pending";
 export const UNDER_REVIEW_STATUS = "under_review";
 export const DISPUTED_STATUS = "disputed";
 
-// Statuses an admin has already ruled on. An upload or a re-check must never
-// silently reopen one of these — that's an admin decision.
-export const DECIDED_STATUSES = ["verified", "rejected"];
+// Statuses that close a verification step for good.
+//
+// `rejected` is deliberately not one of them — it is a retryable state, not a
+// terminal one. Most rejections are clerical — a blurry certificate, the
+// wrong document, a mistyped SCN or NIN — and permanently locking out a real
+// lawyer over a photograph is out of all proportion to the mistake. So a
+// rejected applicant may re-upload, re-run the identity check and resubmit; the
+// admin reviews the new submission and approves or rejects again.
+//
+// Nothing is lost by allowing that, because the terminal control already exists
+// somewhere better: `PATCH /admin/accounts/:id/suspend` sets `Account.status`,
+// which the auth hook refuses outright. Someone who is not a lawyer gets
+// suspended — a second terminal state living inside `verificationStatus` would
+// only have duplicated it.
+//
+// `verified` stays closed: a cleared lawyer must not be able to quietly swap the
+// documents or the SCN their approval was granted on.
+export const FINAL_STATUSES = ["verified"];
 
 // Every document type an account of this role may upload.
 export const ALLOWED_DOC_TYPES: Record<string, string[]> = {

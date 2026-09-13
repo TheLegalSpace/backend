@@ -1,5 +1,6 @@
 import { FastifyInstance } from "fastify";
 import { authHook } from "../middleware/auth";
+import { requireVerifiedAccess } from "../middleware/requireVerifiedAccess";
 import { requireRole } from "../middleware/requireRole";
 import { requireOwner } from "../middleware/requireOwner";
 import { requireCompletedProfile } from "../middleware/requireCompletedProfile";
@@ -16,6 +17,8 @@ const idParam = {
 
 export default async function postRoutes(fastify: FastifyInstance) {
   fastify.addHook("onRequest", authHook);
+  // Unverified lawyers cannot reach the platform — see requireVerifiedAccess.
+  fastify.addHook("preHandler", requireVerifiedAccess);
 
   fastify.post(
     "/",

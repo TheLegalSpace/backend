@@ -24,8 +24,19 @@ export const initRealtime = (httpServer: HttpServer): SocketServer => {
       if (error || !data?.user) return next(new Error("invalid token"));
       const account = await prisma.account.findUnique({
         where: { authUserId: data.user.id },
+        include: { lawyerProfile: { select: { verificationStatus: true } } },
       });
       if (!account || account.status !== "active") return next(new Error("no account"));
+      // The same wall as `requireVerifiedAccess`, because this is a second door.
+      // Sockets authenticate independently of REST, so gating only the routes
+      // would leave an unverified lawyer locked out of every page while still
+      // holding an open connection receiving live messages and notifications.
+      if (
+        account.role === "LAWYER" &&
+        account.lawyerProfile?.verificationStatus !== "verified"
+      ) {
+        return next(new Error("not verified"));
+      }
       (socket as any).accountId = account.id;
       next();
     } catch (err) {

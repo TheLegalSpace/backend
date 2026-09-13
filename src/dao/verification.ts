@@ -22,6 +22,7 @@ export const createLawyerProfileForVerification = async (data: {
   nbaBranch?: string | null;
   verificationStatus: string;
   nbaCheckStatus: string;
+  verificationFlags?: any;
 }) =>
   prisma.lawyerProfile.create({
     data: {
@@ -33,6 +34,7 @@ export const createLawyerProfileForVerification = async (data: {
       verificationStatus: data.verificationStatus,
       nbaCheckStatus: data.nbaCheckStatus,
       nbaCheckedAt: new Date(),
+      ...(data.verificationFlags ? { verificationFlags: data.verificationFlags } : {}),
     },
   });
 

@@ -1,6 +1,7 @@
 import { FastifyInstance } from "fastify";
 import { authHook } from "../middleware/auth";
 import { requireRole } from "../middleware/requireRole";
+import { requireVerifiedAccess } from "../middleware/requireVerifiedAccess";
 import {
   getMe,
   getProfileById,
@@ -55,7 +56,10 @@ export default async function profileRoutes(fastify: FastifyInstance) {
   fastify.addHook("onRequest", authHook);
 
   fastify.get("/me", getMe);
-  fastify.get("/:accountId", getProfileById);
+  // Everything under /me stays open — the wizard and the under-review screen
+  // run on it, so gating it would make verification unreachable. Reading
+  // *other* accounts is the platform, and is gated.
+  fastify.get("/:accountId", { preHandler: requireVerifiedAccess }, getProfileById);
   fastify.patch("/me", { schema: updateProfileSchema }, updateMe);
   fastify.post("/me/avatar", uploadAvatar);
   fastify.post("/me/cover", uploadCover);
@@ -162,8 +166,8 @@ export default async function profileRoutes(fastify: FastifyInstance) {
     uploadVerificationDocument
   );
 
-  fastify.get("/:accountId/connections", { schema: { querystring: paginationQuery } }, getConnections);
-  fastify.get("/:accountId/articles", { schema: { querystring: paginationQuery } }, getProfileArticles);
-  fastify.get("/:accountId/reviews", { schema: { querystring: paginationQuery } }, getProfileReviews);
-  fastify.get("/:accountId/posts", { schema: { querystring: paginationQuery } }, getProfilePosts);
+  fastify.get("/:accountId/connections", { schema: { querystring: paginationQuery }, preHandler: requireVerifiedAccess }, getConnections);
+  fastify.get("/:accountId/articles", { schema: { querystring: paginationQuery }, preHandler: requireVerifiedAccess }, getProfileArticles);
+  fastify.get("/:accountId/reviews", { schema: { querystring: paginationQuery }, preHandler: requireVerifiedAccess }, getProfileReviews);
+  fastify.get("/:accountId/posts", { schema: { querystring: paginationQuery }, preHandler: requireVerifiedAccess }, getProfilePosts);
 }
