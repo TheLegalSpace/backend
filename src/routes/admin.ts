@@ -45,6 +45,7 @@ import {
   getDocketItem,
   approveDocket,
   rejectDocket,
+  refundDocket,
   createDocketPromotion,
   searchInsights,
   analyticsMetrics,
@@ -331,7 +332,7 @@ export default async function adminRoutes(fastify: FastifyInstance) {
               type: "string",
               enum: ["pending_payment", "pending_review", "published", "rejected", "past"],
             },
-            paymentStatus: { type: "string", enum: ["pending", "paid"] },
+            paymentStatus: { type: "string", enum: ["pending", "paid", "refunded"] },
             page: { type: "integer", default: 1 },
             limit: { type: "integer", default: 20 },
           },
@@ -377,6 +378,22 @@ export default async function adminRoutes(fastify: FastifyInstance) {
       },
     },
     rejectDocket
+  );
+  fastify.post(
+    "/docket/:id/refund",
+    {
+      schema: {
+        params: idParam,
+        body: {
+          type: "object",
+          properties: {
+            note: { type: "string", maxLength: 500 },
+            refundReference: { type: "string", maxLength: 120 },
+          },
+        },
+      },
+    },
+    refundDocket
   );
 
   fastify.get(

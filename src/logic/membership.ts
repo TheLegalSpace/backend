@@ -36,7 +36,12 @@ import {
   getInvoiceById,
 } from "../dao/membership";
 import * as paystack from "../services/paystack";
-import { activatePromotionFromCharge } from "./service";
+import {
+  activatePromotionFromCharge,
+  markPromotionRefunded,
+  findPromotionIdByReference,
+} from "./service";
+import { findActiveAdminIds } from "../dao/admin";
 import { activateCreditPurchase } from "./credits";
 
 // ---- helpers ----
@@ -281,12 +286,21 @@ const ensurePaystackPlan = async (plan: any): Promise<string> => {
         `[membership] Paystack plan ${plan.paystackPlanCode} is ${remote.amount} kobo/${remote.interval} but ${plan.code} is ${plan.priceKobo} kobo/${expectedInterval} — re-registering`
       );
     } catch (err: any) {
-      // Couldn't verify (network/API hiccup). Keep the known code rather than
-      // blocking every checkout, but make the gap visible in the logs.
-      console.error(
-        `[membership] could not verify Paystack plan ${plan.paystackPlanCode}: ${err?.message}`
+      // 404 means the plan doesn't exist under this secret key — most often
+      // because the code was registered in test mode and the keys are now live
+      // (test and live are separate Paystack ledgers). Re-register below rather
+      // than sending every checkout to a plan Paystack will refuse.
+      if (err?.paystackStatus !== 404) {
+        // Couldn't verify (network/API hiccup). Keep the known code rather than
+        // blocking every checkout, but make the gap visible in the logs.
+        console.error(
+          `[membership] could not verify Paystack plan ${plan.paystackPlanCode}: ${err?.message}`
+        );
+        return plan.paystackPlanCode;
+      }
+      console.warn(
+        `[membership] Paystack plan ${plan.paystackPlanCode} not found for ${plan.code} — re-registering`
       );
-      return plan.paystackPlanCode;
     }
   }
 
@@ -504,6 +518,16 @@ export const _getInvoiceDownload = async (
 
 // ---- webhook event handling ----
 
+// Payment problems that need a person. Admins get an in-app notification; the
+// log line is what survives if nobody is signed in to see it.
+const alertAdmins = async (payload: Record<string, any>) => {
+  console.error(`[payments] admin alert ${payload.kind} reference=${payload.reference}`);
+  const adminIds = await findActiveAdminIds();
+  for (const recipientAccountId of adminIds) {
+    await dispatchNotification({ recipientAccountId, type: "system", payload, emailable: true });
+  }
+};
+
 export const handlePaystackEvent = async (event: string, data: any): Promise<void> => {
   switch (event) {
     case "charge.success": {
@@ -601,6 +625,43 @@ export const handlePaystackEvent = async (event: string, data: any): Promise<voi
         type: "payment_failed",
         payload: { subscriptionCode: code },
         emailable: true,
+      });
+      return;
+    }
+
+    case "refund.processed": {
+      // A refund made in the Paystack dashboard. For a promotion it closes the
+      // loop on its own; membership and credit refunds touch access and
+      // balances, which is a judgement call, so a person is told instead.
+      const reference = data?.transaction_reference ?? data?.transaction?.reference;
+      if (!reference) return;
+      const promotionId = await findPromotionIdByReference(reference);
+      if (promotionId) {
+        await markPromotionRefunded({
+          serviceRequestId: promotionId,
+          source: "paystack",
+          refundReference: data?.refund_reference ?? data?.id?.toString() ?? null,
+        });
+        return;
+      }
+      await alertAdmins({
+        kind: "payment_refunded_external",
+        reference,
+        amountKobo: data?.amount ?? null,
+      });
+      return;
+    }
+
+    case "charge.dispute.create": {
+      // A chargeback. Paystack gives a deadline to respond, after which the
+      // dispute is lost by default — so this has to reach a person quickly.
+      const reference = data?.transaction?.reference ?? data?.transaction_reference;
+      await alertAdmins({
+        kind: "payment_dispute_opened",
+        reference: reference ?? null,
+        reason: data?.category ?? data?.reason ?? null,
+        amountKobo: data?.transaction?.amount ?? data?.amount ?? null,
+        dueAt: data?.due_at ?? null,
       });
       return;
     }

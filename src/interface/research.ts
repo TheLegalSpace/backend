@@ -5,9 +5,15 @@ export interface ResearchSource {
   url: string;
 }
 
+/**
+ * As stored on `ResearchMessage.attachments`. `key` is the private storage key;
+ * `url` exists only on rows written before PDFs went private, and is never sent
+ * to the client as-is — responses carry a freshly signed, expiring `url` instead.
+ */
 export interface ResearchAttachment {
   kind: "pdf";
-  url: string;
+  key?: string;
+  url?: string;
   filename: string;
   sizeBytes: number;
 }

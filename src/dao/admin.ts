@@ -1,5 +1,13 @@
 import { prisma } from "../config/database";
 
+export const findActiveAdminIds = async (): Promise<string[]> => {
+  const admins = await prisma.account.findMany({
+    where: { role: "ADMIN", status: "active" },
+    select: { id: true },
+  });
+  return admins.map((a) => a.id);
+};
+
 export const listAccounts = async (
   filters: { role?: string; status?: string; verificationStatus?: string; q?: string },
   skip: number,

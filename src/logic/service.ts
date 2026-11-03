@@ -11,6 +11,7 @@ import * as paystack from "../services/paystack";
 import {
   createServiceRequest,
   findServiceRequestById,
+  findPromotionByPaymentReference,
   listServiceRequestsByAccount,
   updateServiceRequest,
 } from "../dao/service";
@@ -175,7 +176,9 @@ export const activatePromotionFromCharge = async (charge: {
 }): Promise<void> => {
   const sr = await findServiceRequestById(charge.serviceRequestId);
   if (!sr || sr.type !== "event_promotion") return;
-  if (sr.paymentStatus === "paid") return; // already processed
+  // Already processed — and a refunded promotion must not be revived when
+  // reconciliation replays the original charge.
+  if (sr.paymentStatus === "paid" || sr.paymentStatus === "refunded") return;
 
   const paidAt = charge.paidAt ?? new Date();
   const payload = { ...((sr.payload as any) || {}) };
@@ -206,6 +209,67 @@ export const activatePromotionFromCharge = async (charge: {
     emailable: true,
   });
 };
+
+/**
+ * Record that a promotion's payment was returned.
+ *
+ * There is no wallet to refund into, so the money goes back by hand — through the
+ * Paystack dashboard, or a bank transfer arranged with support — and this is the
+ * record of it. Paystack-dashboard refunds land here on their own via the
+ * `refund.processed` webhook; anything else is recorded by an admin.
+ *
+ * `paymentStatus: "refunded"` takes the promotion out of revenue (metrics count
+ * `paid` only), and a promotion still live or awaiting review comes down — the
+ * organiser no longer paid for it. Idempotent.
+ */
+export const markPromotionRefunded = async (input: {
+  serviceRequestId: string;
+  source: "paystack" | "manual";
+  refundReference?: string | null;
+  note?: string | null;
+  adminId?: string | null;
+}): Promise<{ sr: any; changed: boolean }> => {
+  const sr = await findServiceRequestById(input.serviceRequestId);
+  if (!sr || sr.type !== "event_promotion") throw notFound("Promotion not found");
+  if (sr.paymentStatus === "refunded") return { sr, changed: false };
+  if (sr.paymentStatus !== "paid") throw badRequest("Only a paid promotion can be refunded");
+
+  const payload = { ...((sr.payload as any) || {}) };
+  payload.refund = {
+    source: input.source,
+    reference: input.refundReference ?? null,
+    note: input.note ?? null,
+    byAdminId: input.adminId ?? null,
+    refundedAt: new Date().toISOString(),
+  };
+
+  await prisma.$transaction(async (tx) => {
+    await tx.serviceRequest.update({
+      where: { id: sr.id },
+      data: { paymentStatus: "refunded", status: "completed", payload },
+    });
+    if (sr.eventId && ["pending_review", "published"].includes(sr.event?.status || "")) {
+      await tx.event.update({ where: { id: sr.eventId }, data: { status: "rejected" } });
+    }
+  });
+
+  await dispatchNotification({
+    recipientAccountId: sr.accountId,
+    type: "system",
+    payload: {
+      kind: "event_promotion_refunded",
+      eventId: sr.eventId,
+      title: sr.event?.title ?? null,
+    },
+    emailable: true,
+  });
+
+  const fresh = await findServiceRequestById(sr.id);
+  return { sr: fresh, changed: true };
+};
+
+export const findPromotionIdByReference = async (reference: string) =>
+  (await findPromotionByPaymentReference(reference))?.id ?? null;
 
 export const _verifyPromotionPayment = async (
   accountId: string,

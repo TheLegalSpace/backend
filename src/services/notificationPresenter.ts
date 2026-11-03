@@ -248,9 +248,18 @@ export const presentNotification = (notif: {
         (p.kind === "event_promotion_approved"
           ? `Your event "${p.title || "promotion"}" is now live on The Legal Space`
           : p.kind === "event_promotion_rejected"
-          ? `Your event promotion was not approved${p.reason ? ` — ${p.reason}` : ""}`
+          ? `Your event promotion was not approved${p.reason ? ` — ${p.reason}` : ""}${
+              // There is no wallet to refund into, so a refund is arranged by hand.
+              p.refund === "manual_pending" ? ". Contact support to arrange your refund." : ""
+            }`
+          : p.kind === "event_promotion_refunded"
+          ? `Your payment for "${p.title || "your event promotion"}" has been refunded`
           : "You have a new notification");
-      if (p.kind === "event_promotion_approved" || p.kind === "event_promotion_rejected") {
+      if (
+        p.kind === "event_promotion_approved" ||
+        p.kind === "event_promotion_rejected" ||
+        p.kind === "event_promotion_refunded"
+      ) {
         title = "Event promotion";
         path = "/services";
       }
@@ -276,6 +285,18 @@ export const presentNotification = (notif: {
           p.subject ? ` — "${p.subject}"` : ""
         } is now ${humanize(p.status) || "updated"}`;
         path = "/support";
+      }
+      // Admin-only payment alerts — raised by Paystack webhooks, for things that
+      // need a person: a chargeback, or a refund made outside the app.
+      if (p.kind === "payment_dispute_opened") {
+        title = "Payment disputed";
+        body = `A customer disputed payment ${p.reference || ""}${
+          p.reason ? ` — ${p.reason}` : ""
+        }. Respond in the Paystack dashboard before the deadline.`;
+      }
+      if (p.kind === "payment_refunded_external") {
+        title = "Refund processed on Paystack";
+        body = `Payment ${p.reference || ""} was refunded on Paystack. Check whether the member's access needs adjusting.`;
       }
       break;
     default:

@@ -10,7 +10,8 @@ import {
   listAuditLog,
   listVerificationDocuments,
 } from "../dao/admin";
-import { signedFileUrl } from "../services/storage";
+import { documentUrl } from "../services/storage";
+import { markPromotionRefunded } from "./service";
 import { paginate, buildPagination } from "../helpers/pagination";
 import { dispatchNotification } from "../services/notification";
 import { sendEmail } from "../services/email";
@@ -263,7 +264,7 @@ export const _verificationDocuments = async (
     id: d.id,
     docType: d.docType,
     status: d.status,
-    url: signedFileUrl(d.s3Key),
+    url: documentUrl(d.s3Key),
     createdAt: d.createdAt,
   }));
   return response({
@@ -468,6 +469,41 @@ export const _approveDocket = async (
     emailable: true,
   });
   return response({ error: false, message: "Promotion approved", data: updated });
+};
+
+/**
+ * Record a refund paid outside Paystack's refund flow — typically a bank transfer
+ * arranged through support, since there is no wallet to refund into. Refunds made
+ * in the Paystack dashboard record themselves via the `refund.processed` webhook
+ * and don't need this.
+ */
+export const _refundDocket = async (
+  adminId: string,
+  id: string,
+  input: { note?: string; refundReference?: string }
+): Promise<Response> => {
+  const { sr, changed } = await markPromotionRefunded({
+    serviceRequestId: id,
+    source: "manual",
+    refundReference: input.refundReference ?? null,
+    note: input.note ?? null,
+    adminId,
+  });
+  if (changed) {
+    await recordAuditLog({
+      adminAccountId: adminId,
+      action: "docket.refund",
+      targetType: "service_request",
+      targetId: id,
+      reason: input.note ?? undefined,
+      metadata: { refundReference: input.refundReference ?? null },
+    });
+  }
+  return response({
+    error: false,
+    message: changed ? "Refund recorded" : "Refund was already recorded",
+    data: sr,
+  });
 };
 
 export const _rejectDocket = async (

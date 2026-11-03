@@ -6,13 +6,19 @@ import {
   findThreadById,
   updateThread,
   touchThread,
-  softDeleteThread,
+  deleteThread,
   createMessage,
   listMessagesForThread,
   countMessagesForThread,
 } from "../dao/research";
 import { runResearch, generateThreadTitle } from "../services/research";
-import { uploadToR2, MAX_ARTICLE_ASSET_BYTES } from "../services/storage";
+import {
+  uploadPrivateDocument,
+  documentUrl,
+  deletePrivateDocument,
+  parseCloudinaryUrl,
+  MAX_ARTICLE_ASSET_BYTES,
+} from "../services/storage";
 import { assertResearchCredit, spendResearchCredit } from "./credits";
 
 const PDF_MIME = "application/pdf";
@@ -21,6 +27,34 @@ const assertOwner = (thread: { accountId: string } | null, accountId: string) =>
   if (!thread) throw notFound("Research thread not found");
   if (thread.accountId !== accountId) throw forbidden("You do not own this research thread");
 };
+
+// The storage key for an attachment — rows written before PDFs went private hold
+// only a public URL, from which the key can be recovered.
+const attachmentKey = (a: ResearchAttachment): string | null => {
+  if (a.key) return a.key;
+  if (!a.url) return null;
+  const parsed = parseCloudinaryUrl(a.url);
+  return parsed ? parsed.publicId : null;
+};
+
+// Research PDFs are confidential, so a response never carries a stored URL —
+// only a link signed now that expires shortly. The ownership check has already
+// run by the time this is called.
+const presentAttachments = (attachments: any) =>
+  Array.isArray(attachments)
+    ? attachments.map((a: ResearchAttachment) => {
+        const { key, ...rest } = a;
+        return { ...rest, url: key ? documentUrl(key) : a.url ?? null };
+      })
+    : attachments;
+
+const presentThread = (thread: any) => ({
+  ...thread,
+  messages: (thread.messages || []).map((m: any) => ({
+    ...m,
+    attachments: presentAttachments(m.attachments),
+  })),
+});
 
 export const _createThread = async (accountId: string): Promise<Response> => {
   const thread = await createThread(accountId);
@@ -35,7 +69,11 @@ export const _listThreads = async (accountId: string): Promise<Response> => {
 export const _getThread = async (id: string, accountId: string): Promise<Response> => {
   const thread = await findThreadById(id);
   assertOwner(thread, accountId);
-  return response({ error: false, message: "Research thread retrieved", data: thread });
+  return response({
+    error: false,
+    message: "Research thread retrieved",
+    data: presentThread(thread),
+  });
 };
 
 export const _postMessage = async (
@@ -68,17 +106,16 @@ export const _postMessage = async (
     if (input.pdfBuffer.subarray(0, 4).toString("ascii") !== "%PDF") {
       throw badRequest("File does not appear to be a valid PDF");
     }
-    const { url } = await uploadToR2({
+    const { key } = await uploadPrivateDocument({
       buffer: input.pdfBuffer,
       mimetype: input.pdfMimetype,
       originalName: input.pdfFilename || "document.pdf",
       folder: `research/${accountId}`,
       maxBytes: MAX_ARTICLE_ASSET_BYTES,
-      allowPdf: true,
     });
     attachment = {
       kind: "pdf",
-      url,
+      key,
       filename: input.pdfFilename || "document.pdf",
       sizeBytes: input.pdfBuffer.byteLength,
     };
@@ -186,9 +223,24 @@ export const _setPinned = async (
   });
 };
 
+/**
+ * Deleting a research thread erases it — rows and uploaded PDFs.
+ *
+ * Unlike account deletion, which archives because a complaint may need the record
+ * later, a private research thread is nobody's evidence: the user put
+ * confidential legal material into it and expects "delete" to mean gone. Rows go
+ * first (messages cascade); the files are removed after, best-effort, so a
+ * storage hiccup leaves an unreachable private file rather than a thread that
+ * points at nothing.
+ */
 export const _deleteThread = async (id: string, accountId: string): Promise<Response> => {
   const thread = await findThreadById(id);
   assertOwner(thread, accountId);
-  await softDeleteThread(id);
+  const keys = thread!.messages
+    .flatMap((m: any) => (Array.isArray(m.attachments) ? m.attachments : []))
+    .map(attachmentKey)
+    .filter((k: string | null): k is string => Boolean(k));
+  await deleteThread(id);
+  await Promise.all(keys.map(deletePrivateDocument));
   return response({ error: false, message: "Research thread deleted" });
 };

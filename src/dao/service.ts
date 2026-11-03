@@ -6,6 +6,17 @@ export const createServiceRequest = async (data: any) =>
 export const findServiceRequestById = async (id: string) =>
   prisma.serviceRequest.findUnique({ where: { id }, include: { event: true } });
 
+// The Paystack reference lives in `payload.payment.reference` (promotion revenue
+// deliberately has no Payment row — see logic/service.ts).
+export const findPromotionByPaymentReference = async (reference: string) =>
+  prisma.serviceRequest.findFirst({
+    where: {
+      type: "event_promotion",
+      payload: { path: ["payment", "reference"], equals: reference },
+    },
+    include: { event: true },
+  });
+
 export const listServiceRequestsByAccount = async (
   accountId: string,
   skip: number,

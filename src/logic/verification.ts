@@ -4,7 +4,7 @@ import { Response } from "../interface";
 import { findAccountById } from "../dao/account";
 import { invalidateAccountCache } from "../middleware/auth";
 import { paginate, buildPagination } from "../helpers/pagination";
-import { uploadToR2, MAX_ARTICLE_ASSET_BYTES } from "../services/storage";
+import { uploadPrivateDocument, documentUrl, MAX_ARTICLE_ASSET_BYTES } from "../services/storage";
 import { dispatchNotification } from "../services/notification";
 import { recordAuditLog } from "../dao/admin";
 import {
@@ -398,13 +398,12 @@ export const _uploadDisputeEvidence = async (
     throw conflict("This dispute has already been resolved");
   }
 
-  const { key } = await uploadToR2({
+  const { key } = await uploadPrivateDocument({
     buffer,
     mimetype,
     originalName: filename,
     folder: `disputes/${dispute.caseReference}`,
     maxBytes: MAX_ARTICLE_ASSET_BYTES,
-    allowPdf: true,
   });
 
   await createVerificationDocument({
@@ -724,6 +723,15 @@ export const _listScnDisputes = async (
     data: {
       items: items.map((d: any) => ({
         ...presentDispute(d),
+        // Admin-only: the ruling is made on this evidence, so the queue carries
+        // short-lived links to it. The claimant's own view never does.
+        evidence: (d.evidence || []).map((e: any) => ({
+          id: e.id,
+          docType: e.docType,
+          label: DOC_TYPE_LABELS[e.docType] || e.docType,
+          url: documentUrl(e.s3Key),
+          createdAt: e.createdAt,
+        })),
         claimant: {
           id: d.claimant.id,
           fullName: d.claimant.fullName,

@@ -42,6 +42,7 @@ import { onboardingState } from "../services/onboarding";
 import { redis } from "../config/redis";
 import {
   uploadToR2,
+  uploadPrivateDocument,
   MAX_AVATAR_BYTES,
   MAX_ARTICLE_ASSET_BYTES,
 } from "../services/storage";
@@ -741,13 +742,12 @@ export const _uploadVerificationDocument = async (
     throw conflict("Your verification has already been approved");
   }
 
-  const { key } = await uploadToR2({
+  const { key } = await uploadPrivateDocument({
     buffer,
     mimetype,
     originalName: filename,
     folder: `verification/${accountId}/${docType}`,
     maxBytes: MAX_ARTICLE_ASSET_BYTES,
-    allowPdf: true,
   });
 
   const doc = await createVerificationDocument({ accountId, docType, s3Key: key });

@@ -18,6 +18,7 @@ import { startSubscriptionSweepJob } from "./jobs/subscriptionSweep";
 import { startConversationExpiryJob } from "./jobs/conversationExpiry";
 import { startConversationReminderJob } from "./jobs/conversationReminders";
 import { startDailyStatsJob } from "./jobs/dailyStats";
+import { startPaymentReconciliationJob } from "./jobs/paymentReconciliation";
 
 import authRoutes from "./routes/auth";
 import profileRoutes from "./routes/profile";
@@ -164,6 +165,7 @@ const start = async () => {
   startConversationExpiryJob();
   startConversationReminderJob();
   startDailyStatsJob();
+  startPaymentReconciliationJob();
   console.log("[app] cron jobs scheduled");
 
   const shutdown = async () => {

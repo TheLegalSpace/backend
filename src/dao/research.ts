@@ -37,11 +37,10 @@ export const touchThread = async (id: string) => {
   });
 };
 
-export const softDeleteThread = async (id: string) => {
-  return prisma.researchThread.update({
-    where: { id },
-    data: { deletedAt: new Date() },
-  });
+// Hard delete — messages cascade. `deletedAt` is only set on rows soft-deleted
+// before this; `scripts/migrate-private-documents.ts` purges those.
+export const deleteThread = async (id: string) => {
+  return prisma.researchThread.delete({ where: { id } });
 };
 
 export const createMessage = async (data: {

@@ -21,6 +21,7 @@ import {
   _getDocketItem,
   _approveDocket,
   _rejectDocket,
+  _refundDocket,
   _adminCreatePromotion,
 } from "../logic/admin";
 import {
@@ -124,6 +125,16 @@ export const approveDocket = async (req: FastifyRequest, reply: FastifyReply) =>
   try {
     const { id } = req.params as { id: string };
     return responseOk(reply, await _approveDocket(req.account.id, id));
+  } catch (e) {
+    return responseBad(reply, e);
+  }
+};
+
+export const refundDocket = async (req: FastifyRequest, reply: FastifyReply) => {
+  try {
+    const { id } = req.params as { id: string };
+    const body = (req.body || {}) as { note?: string; refundReference?: string };
+    return responseOk(reply, await _refundDocket(req.account.id, id, body));
   } catch (e) {
     return responseBad(reply, e);
   }

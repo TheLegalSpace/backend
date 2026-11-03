@@ -30,7 +30,11 @@ const request = async <T = any>(
   const json: any = await res.json().catch(() => ({}));
   if (!res.ok || json?.status === false) {
     const detail = json?.message || `${res.status} ${res.statusText}`;
-    throw serviceUnavailable(`Paystack error: ${detail}`);
+    const err: any = serviceUnavailable(`Paystack error: ${detail}`);
+    // Callers need to tell "that thing doesn't exist" (404) from "Paystack is
+    // having a bad minute" — the response to each is different.
+    err.paystackStatus = res.status;
+    throw err;
   }
   return json.data as T;
 };
@@ -65,6 +69,26 @@ export const initializeTransaction = async (input: {
 
 export const verifyTransaction = async (reference: string): Promise<any> => {
   return request("GET", `/transaction/verify/${encodeURIComponent(reference)}`);
+};
+
+// One page of transactions. Each item has the same shape as a `charge.success`
+// webhook's `data`, which is what lets reconciliation replay them through the
+// webhook handler.
+export const listTransactions = async (input: {
+  status?: "success" | "failed" | "abandoned";
+  from: Date;
+  to: Date;
+  page: number;
+  perPage: number;
+}): Promise<any[]> => {
+  const qs = new URLSearchParams({
+    from: input.from.toISOString(),
+    to: input.to.toISOString(),
+    page: String(input.page),
+    perPage: String(input.perPage),
+    ...(input.status ? { status: input.status } : {}),
+  });
+  return request("GET", `/transaction?${qs.toString()}`);
 };
 
 export const getSubscription = async (code: string): Promise<any> => {

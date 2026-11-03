@@ -28,11 +28,18 @@ export default async function webhookRoutes(fastify: FastifyInstance) {
     }
 
     const evt = req.body as { event?: string; data?: any };
-    // Acknowledge fast; Paystack retries on non-2xx. Errors are logged, not surfaced.
+    // A failed handler answers 500 so Paystack redelivers. Acknowledging it would
+    // drop a charge the customer has already paid — and every handler is
+    // idempotent on the payment reference, so a retry can't double-apply.
+    // `jobs/paymentReconciliation.ts` is the backstop if retries run out.
     try {
       if (evt?.event) await handlePaystackEvent(evt.event, evt.data);
     } catch (err: any) {
-      console.error("[webhook] handler error:", err?.message);
+      console.error(
+        `[webhook] handler error event=${evt?.event} reference=${evt?.data?.reference}:`,
+        err?.message
+      );
+      return reply.status(500).send({ received: false });
     }
     return reply.status(200).send({ received: true });
   });

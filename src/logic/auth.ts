@@ -25,6 +25,14 @@ import { matterNameOf } from "./request";
 const ROLE_KEY = (email: string) => `register:role:${email.toLowerCase()}`;
 const ROLE_TTL_SECONDS = 24 * 60 * 60;
 
+// The role chosen at signup has to survive until the email code is verified. It
+// is written to the Supabase user's `app_metadata` (server-writable only, and
+// returned by `verifyOtp`) as well as Redis — Redis alone meant a Redis outage
+// between the two steps silently turned a lawyer into a USER.
+const SELF_REGISTER_ROLES: Role[] = ["USER", "PENDING_PROFESSIONAL"];
+const registeredRole = (value: unknown): Role | null =>
+  SELF_REGISTER_ROLES.includes(value as Role) ? (value as Role) : null;
+
 const placeholderName = (email: string) => {
   const local = email.split("@")[0] || "user";
   return local.slice(0, 80);
@@ -59,7 +67,7 @@ const issueAuthCode = async (opts: {
   email: string;
   linkType: "magiclink" | "recovery";
   build: (code: string) => { subject: string; html: string; text: string };
-}): Promise<void> => {
+}): Promise<string | null> => {
   const { stage, email, linkType, build } = opts;
 
   await assertCanSendAuthEmail(stage, email);
@@ -89,6 +97,7 @@ const issueAuthCode = async (opts: {
     const { subject, html, text } = build(data.properties.email_otp);
     await sendEmail({ to: email, subject, html, text });
     console.log(`[auth] ${stage} code delivered email=${email}`);
+    return data.user?.id ?? null;
   } catch (err) {
     await releaseAuthEmailCooldown(stage, email);
     throw err;
@@ -120,6 +129,7 @@ export const _registerStart = async (body: RegisterStartBody): Promise<Response>
     email: body.email,
     password: body.password,
     email_confirm: false,
+    app_metadata: { registerRole: body.role },
   });
   if (created.error) {
     // If the user already exists in Supabase (orphaned from a previous attempt), just resend the OTP.
@@ -141,7 +151,7 @@ export const _registerStart = async (body: RegisterStartBody): Promise<Response>
     }
   }
 
-  await issueAuthCode({
+  const authUserId = await issueAuthCode({
     stage: "register",
     email: body.email,
     // `magiclink`, not `signup`, and deliberately so: `generateLink({type:"signup"})`
@@ -152,6 +162,18 @@ export const _registerStart = async (body: RegisterStartBody): Promise<Response>
     linkType: "magiclink",
     build: verificationCodeEmail,
   });
+
+  // A pre-existing Supabase user (an abandoned earlier attempt) skipped the
+  // createUser above, so its stored role may be stale or missing — and they may
+  // have picked differently this time.
+  if (created.error && authUserId) {
+    const { error } = await supabaseAdmin.auth.admin.updateUserById(authUserId, {
+      app_metadata: { registerRole: body.role },
+    });
+    if (error) {
+      console.error(`[auth] register.start could not store role email=${body.email}`, error.message);
+    }
+  }
 
   await redis.set(ROLE_KEY(body.email), body.role, "EX", ROLE_TTL_SECONDS).catch(() => null);
 
@@ -230,8 +252,10 @@ export const _registerVerify = async (body: RegisterVerifyBody): Promise<Respons
     });
   }
 
-  const roleRaw = await redis.get(ROLE_KEY(body.email)).catch(() => null);
-  const role = (roleRaw as Role) || "USER";
+  const role =
+    registeredRole((data.user.app_metadata as any)?.registerRole) ??
+    registeredRole(await redis.get(ROLE_KEY(body.email)).catch(() => null)) ??
+    "USER";
 
   const account = await prisma.account.create({
     data: {
